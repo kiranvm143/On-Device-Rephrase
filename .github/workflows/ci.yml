@@ -15,24 +15,25 @@ jobs:
         python: ["3.9", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Install
         run: pip install ./desktop
       - name: Check
-        # app/popup/textio need a display, so only the headless modules are imported here.
+        # No display on CI: every module must still import (pynput/Tk only load when the app runs).
         run: |
           rephrase --version
-          python -c "from rephrase import prompts, engines, config; assert prompts.clean('hey i am here', 'x') == 'Hey I am here'; print(engines.default_engine())"
+          python -c "from rephrase import app, popup, textio, prompts, engines; assert prompts.clean('hey i am here', 'x') == 'Hey I am here'; print(engines.default_engine())"
+          rephrase --trigger || echo "trigger correctly reports Rephrase isn't running"
           python -m compileall -q desktop/rephrase
 
   installers:
     name: Installer syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: bash -n install/install.sh
       - name: PowerShell parse
         shell: pwsh

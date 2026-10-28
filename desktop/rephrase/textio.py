@@ -14,9 +14,10 @@ import time
 import uuid
 
 import pyperclip
-from pynput.keyboard import Controller, Key
 
-_keyboard = Controller()
+# pynput needs an X display just to import on Linux, so load it only when keys are sent
+# (never on Wayland, and never for `rephrase --version` / `--trigger` / `--test`).
+_keyboard = None
 
 
 def is_wayland() -> bool:
@@ -71,6 +72,10 @@ def focus_tk_window(tk_window) -> None:
 # --- Clipboard
 
 def _send_ctrl(char: str) -> None:
+    global _keyboard
+    from pynput.keyboard import Controller, Key
+    if _keyboard is None:
+        _keyboard = Controller()
     with _keyboard.pressed(Key.ctrl):
         _keyboard.tap(char)
 

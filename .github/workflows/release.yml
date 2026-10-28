@@ -18,8 +18,8 @@ jobs:
           - { os: ubuntu-22.04, name: Linux, file: Rephrase, asset: Rephrase-Linux-x86_64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install ./desktop pyinstaller
@@ -38,7 +38,7 @@ jobs:
     runs-on: macos-26
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ./macos/build.sh
       - run: ditto -c -k --keepParent macos/build/Rephrase.app Rephrase-macOS.zip
       - uses: actions/upload-artifact@v4
