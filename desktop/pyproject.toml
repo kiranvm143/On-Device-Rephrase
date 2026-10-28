@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rephrase-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Rephrase for Windows and Linux: select text anywhere, press a hotkey, get rewrites from Claude, ChatGPT or a local model."
 readme = "README.md"
 license = { text = "MIT" }

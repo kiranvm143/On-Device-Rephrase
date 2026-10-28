@@ -9,9 +9,10 @@ private final class KeyPanel: NSPanel {
 
 @MainActor
 final class PopupModel: ObservableObject {
-    enum State { case loading, done(String), failed(String) }
+    enum State { case loading, done(String), failed(String), setup(EngineKind, EngineState) }
 
     @Published var mode: RewriteMode = .fix
+    @Published private(set) var engine: EngineKind = RewriteEngine.shared.kind
     @Published private(set) var states: [RewriteMode: State] = [:]
     let captured: CapturedText
 
@@ -32,18 +33,37 @@ final class PopupModel: ObservableObject {
         if case .loading = states[newMode] { return }
         states[newMode] = .loading
         let text = captured.text
+        let engine = engine
         Task {
             do {
-                let output = try await RewriteEngine.shared.rewrite(text, mode: newMode)
+                let output = try await RewriteEngine.shared.rewrite(text, mode: newMode, using: engine)
+                guard engine == self.engine else { return }   // you switched engines meanwhile
                 states[newMode] = .done(output)
+            } catch RewriteError.needsSetup(let kind, let state) {
+                EngineSetup.shared.record(kind, state)
+                states[newMode] = .setup(kind, state)
             } catch {
                 states[newMode] = .failed(error.localizedDescription)
             }
         }
     }
 
+    /// Switches engine from the popup's picker; remembered for next time.
+    func switchEngine(_ kind: EngineKind) {
+        guard kind != engine else { return }
+        RewriteEngine.shared.kind = kind
+        Log.write("engine: \(kind.rawValue) (from popup)")
+        engine = kind
+        retryAll()
+    }
+
     func retry() {
         states[mode] = nil
+        select(mode)
+    }
+
+    func retryAll() {
+        states = [:]
         select(mode)
     }
 }
@@ -55,9 +75,18 @@ final class PopupController {
     private var keyMonitor: Any?
     private var clickMonitor: Any?
 
-    static let size = NSSize(width: 460, height: 210)
+    static let size = NSSize(width: 540, height: 230)
 
     var isShowing: Bool { panel != nil }
+
+    /// An engine finished setting up: retry in the open popup, or say so if it was closed.
+    func engineReady(_ kind: EngineKind) {
+        if let model, model.engine == kind {
+            model.retryAll()
+        } else if model == nil {
+            showMessage("\(kind.shortName) is ready ✓ Click ✨ or press ⌃⌥R to use it.")
+        }
+    }
 
     func show(for captured: CapturedText) {
         close()
@@ -92,6 +121,7 @@ final class PopupController {
         }
 
         model.select(.fix)
+        EngineSetup.shared.refreshAll()   // status badges in the engine picker
     }
 
     /// A short message near the mouse that closes itself, used when there's nothing to rewrite.
@@ -170,7 +200,13 @@ final class PopupController {
         let modes = RewriteMode.allCases
         switch event.keyCode {
         case 53: cancel(); return true                        // esc
-        case 36, 76: replace(); return true                  // return / enter
+        case 36, 76:                                         // return / enter
+            if case .setup(let kind, _) = model.current {
+                EngineSetup.shared.performAction(for: kind)   // Enter runs the setup button
+            } else {
+                replace()
+            }
+            return true
         case 48:                                             // tab / shift-tab cycles modes
             let i = modes.firstIndex(of: model.mode)!
             let step = event.modifierFlags.contains(.shift) ? modes.count - 1 : 1
@@ -222,6 +258,7 @@ private struct PopupView: View {
                     .help("Press \(index + 1)")
                 }
                 Spacer()
+                EnginePicker(model: model)
             }
 
             ScrollView {
@@ -257,6 +294,8 @@ private struct PopupView: View {
             }
         case .failed(let message):
             Text(message).foregroundStyle(.red)
+        case .setup(let kind, let state):
+            SetupPanel(kind: kind, reported: state)
         case .done(let text):
             if model.mode == .fix {
                 if text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -268,6 +307,70 @@ private struct PopupView: View {
                 }
             } else {
                 Text(text).font(.system(size: 14))
+            }
+        }
+    }
+}
+
+/// Top-right menu to switch engine, with a status badge for each one that isn't ready.
+private struct EnginePicker: View {
+    @ObservedObject var model: PopupModel
+    @ObservedObject private var setup = EngineSetup.shared
+
+    var body: some View {
+        Menu {
+            ForEach(EngineKind.allCases, id: \.self) { kind in
+                Button {
+                    model.switchEngine(kind)
+                } label: {
+                    let state = setup.state(kind)
+                    Text("\(kind == model.engine ? "✓ " : "    ")\(kind.title)\(state == .ready ? "" : "  — \(state.badge)")")
+                }
+            }
+        } label: {
+            Text(model.engine.shortName).font(.system(size: 12, weight: .medium))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Choose which AI rewrites your text")
+    }
+}
+
+/// Shown instead of a result when the chosen engine needs installing, signing in, starting or a model.
+private struct SetupPanel: View {
+    let kind: EngineKind
+    let reported: EngineState
+    @ObservedObject private var setup = EngineSetup.shared
+
+    var body: some View {
+        // Prefer the live state (it updates as setup progresses) over what the rewrite reported.
+        let live = setup.state(kind)
+        let state = live == .checking || live == .ready ? reported : live
+        let copy = SetupCopy(kind: kind, state: state)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(copy.headline).font(.system(size: 14, weight: .semibold))
+            Text(copy.detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                if let activity = setup.activity {
+                    if let p = setup.progress {
+                        ProgressView(value: p).frame(width: 120)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(activity).font(.system(size: 12))
+                } else if let title = copy.actionTitle {
+                    Button(title) { setup.performAction(for: kind) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                }
+                Button("Check again") {
+                    Task { if await setup.refresh(kind) == .ready { setup.onReady?(kind) } }
+                }
+                .controlSize(.regular)
+            }
+            if let error = setup.lastError {
+                Text(error).font(.system(size: 11)).foregroundStyle(.red)
             }
         }
     }

@@ -3,8 +3,10 @@
 A Grammarly-style writing helper that works in **every app**: select text (or just type in a text box),
 press a hotkey or click the ✨ icon, and pick a rewrite — **Fix · Rephrase · Shorter · Professional · Friendly**.
 
-- **Mac:** runs on Apple's **on-device** model — free, offline, no account. Optional Claude or ChatGPT.
-- **Windows & Linux:** uses **your own Claude or ChatGPT login** (through their official CLIs), or a free local model via Ollama.
+- **Mac:** runs on Apple's **on-device** model — free, offline, no account. Or Claude, ChatGPT, or Ollama.
+- **Windows & Linux:** uses **your own Claude or ChatGPT account**, or a free local model via Ollama.
+- **Switch engines right in the popup.** If one isn't set up yet, the popup offers **Install**, **Sign in** or
+  **Download model** buttons — no terminal needed. Sign-in happens in your browser.
 - **No API keys.** Rephrase never sees or stores your login.
 
 <p align="center"><img src="docs/popup.png" width="460" alt="Rephrase popup showing grammar fixes in red and green"></p>
@@ -54,23 +56,28 @@ All installers start Rephrase right away and set it to start when you log in.
 | Replace your text | `↩` | `Enter` |
 | Copy instead | `⌘C` | `Ctrl+C` |
 | Close | `esc` | `Esc` |
-| Change engine | Menu-bar icon → Engine | Tray icon → Engine |
+| Change engine | Engine name at the popup's top right, or menu-bar icon → Engine | Engine name at the popup's top right, or tray icon → Engine |
 
 On Mac, if the icon covers something, press and hold it and drag it away; the spot is remembered per app.
 
 ## Engines
 
-| Engine | Platforms | Setup | Cost |
-|---|---|---|---|
-| **Apple on-device** (default on Mac) | Mac | Turn on Apple Intelligence | Free, offline |
-| **Claude** | All | Install [Claude Code](https://claude.com/product/claude-code), run `claude` once and sign in | Your Claude plan |
-| **ChatGPT** | All | `npm i -g @openai/codex`, then `codex login` and sign in with ChatGPT | Your ChatGPT plan |
-| **Local (Ollama)** | Windows, Linux | Install [Ollama](https://ollama.com), then `ollama pull llama3.2` | Free, offline |
+Pick an engine from the name at the top right of the popup. If it isn't ready, the popup shows what to do:
 
-**How the Claude and ChatGPT logins work:** Rephrase runs the official `claude` or `codex` program already on your
-computer, in a no-tools, text-only mode, and reads its answer. You sign in to those programs yourself; Rephrase never
-touches your credentials or tokens. Please check that this use fits your plan's terms — Anthropic, for example,
-intends Claude subscription logins for its own apps, and an API key is the supported route for heavy or shared use.
+| Engine | Platforms | What the popup sets up for you | Cost |
+|---|---|---|---|
+| **Apple on-device** (default on Mac) | Mac | Nothing — opens Settings if Apple Intelligence is off | Free, offline |
+| **Claude** | All | **Install Claude Code** (Anthropic's installer) → **Sign in to Claude** in your browser | Your Claude plan |
+| **ChatGPT** | All | **Install Codex** (via npm or Homebrew) → **Sign in with ChatGPT** in your browser | Your ChatGPT plan |
+| **Local (Ollama)** | All | **Install Ollama** → **Start Ollama** → **Download model** (~2 GB, with progress) | Free, offline |
+
+Installing Codex needs Node.js (or Homebrew on Mac); installing Ollama on Linux opens its download page.
+
+**How the Claude and ChatGPT logins work:** Rephrase runs the official `claude` or `codex` program on your computer,
+in a no-tools, text-only mode, and reads its answer. Signing in runs their own `claude auth login` / `codex login`,
+which open your browser; Rephrase never touches your credentials or tokens. Please check that this use fits your
+plan's terms — Anthropic, for example, intends Claude subscription logins for its own apps, and an API key is the
+supported route for heavy or shared use.
 
 ## Privacy
 

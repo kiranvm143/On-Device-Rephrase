@@ -51,22 +51,35 @@ enum RewriteMode: String, CaseIterable, Identifiable {
 enum RewriteError: LocalizedError {
     case unavailable(String)
     case failed(String)
+    /// The engine isn't installed / signed in / running yet; the popup shows a setup button.
+    case needsSetup(EngineKind, EngineState)
 
     var errorDescription: String? {
         switch self {
         case .unavailable(let msg), .failed(let msg): msg
+        case .needsSetup(let kind, let state): SetupCopy(kind: kind, state: state).headline
         }
     }
 }
 
 enum EngineKind: String, CaseIterable {
-    case apple, claude, chatgpt
+    case apple, claude, chatgpt, ollama
 
     var title: String {
         switch self {
         case .apple: "Apple on-device (free, offline)"
-        case .claude: "Claude (your Claude Code login)"
-        case .chatgpt: "ChatGPT (your Codex login)"
+        case .claude: "Claude (your Claude account)"
+        case .chatgpt: "ChatGPT (your ChatGPT account)"
+        case .ollama: "Local model (Ollama, free)"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .apple: "Apple"
+        case .claude: "Claude"
+        case .chatgpt: "ChatGPT"
+        case .ollama: "Ollama"
         }
     }
 
@@ -75,6 +88,7 @@ enum EngineKind: String, CaseIterable {
         case .apple: "Rewriting on-device…"
         case .claude: "Asking Claude…"
         case .chatgpt: "Asking ChatGPT…"
+        case .ollama: "Asking your local model…"
         }
     }
 }
@@ -118,21 +132,31 @@ final class RewriteEngine: @unchecked Sendable {
             return clean(try await CLIEngine.claude(instructions: instructions(for: mode), prompt: prompt), original: text)
         case .chatgpt:
             return clean(try await CLIEngine.chatgpt(instructions: instructions(for: mode), prompt: prompt), original: text)
+        case .ollama:
+            let out = try await Ollama.chat(system: instructions(for: mode), user: prompt,
+                                            temperature: mode == .fix ? 0.1 : 0.7)
+            return clean(out, original: text)
+        }
+    }
+
+    /// Why Apple's model can't be used right now, or nil when it's ready.
+    func appleUnavailableReason() -> String? {
+        switch model.availability {
+        case .available: nil
+        case .unavailable(.appleIntelligenceNotEnabled):
+            "Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri."
+        case .unavailable(.modelNotReady):
+            "Apple's on-device model is still downloading. Try again in a few minutes."
+        case .unavailable(.deviceNotEligible):
+            "This Mac doesn't support Apple Intelligence. Choose Claude, ChatGPT or Ollama instead."
+        case .unavailable:
+            "Apple's on-device model is unavailable right now."
         }
     }
 
     private func rewriteOnDevice(_ text: String, mode: RewriteMode) async throws -> String {
-        switch model.availability {
-        case .available:
-            break
-        case .unavailable(.appleIntelligenceNotEnabled):
-            throw RewriteError.unavailable("Turn on Apple Intelligence in System Settings → Apple Intelligence & Siri.")
-        case .unavailable(.modelNotReady):
-            throw RewriteError.unavailable("Apple's on-device model is still downloading. Try again in a few minutes.")
-        case .unavailable(.deviceNotEligible):
-            throw RewriteError.unavailable("This Mac doesn't support Apple Intelligence.")
-        case .unavailable:
-            throw RewriteError.unavailable("Apple's on-device model is unavailable right now.")
+        if let reason = appleUnavailableReason() {
+            throw RewriteError.needsSetup(.apple, .unavailable(reason))
         }
 
         // A fresh session per request keeps each rewrite independent.

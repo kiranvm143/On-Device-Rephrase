@@ -10,7 +10,7 @@ import threading
 import time
 import tkinter as tk
 
-from . import __version__, config, engines, prompts, textio
+from . import __version__, config, engines, enginesetup, prompts, textio
 
 PORT = 47613  # local-only socket so `rephrase --trigger` can reach the running app
 
@@ -33,6 +33,9 @@ class App:
         self.events = queue.Queue()     # work for the Tk thread, from hotkey / tray / socket threads
         self.popup = None
         self.held = set()               # modifier keys currently held down
+        # Install / sign-in jobs, shared by every popup so they survive the popup closing.
+        self.setup_runner = enginesetup.Runner(self.cfg, lambda engine, error: self.events.put(
+            lambda: self._setup_finished(engine, error)))
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -160,7 +163,16 @@ class App:
             self.popup = None
 
         from .popup import Popup
-        self.popup = Popup(self.root, text, self.cfg["engine"], self.cfg, on_replace, on_close)
+        self.popup = Popup(self.root, text, self.cfg, self.setup_runner, self.set_engine, on_replace, on_close)
+
+    def _setup_finished(self, engine, error):
+        # With the popup open it re-checks on its own; otherwise say it's ready (or what went wrong).
+        if self.popup is not None:
+            return
+        if error:
+            self.toast(error)
+        elif engines.status(engine, self.cfg) == engines.READY:
+            self.toast(f"{engines.SHORT[engine]} is ready ✓  Select text and press the hotkey to use it.")
 
     def set_engine(self, name):
         self.cfg["engine"] = name

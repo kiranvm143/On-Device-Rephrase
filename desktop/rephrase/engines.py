@@ -18,10 +18,18 @@ from . import prompts
 ENGINES = ["claude", "chatgpt", "ollama"]
 
 TITLES = {
-    "claude": "Claude (your Claude Code login)",
-    "chatgpt": "ChatGPT (your Codex login)",
+    "claude": "Claude (your Claude account)",
+    "chatgpt": "ChatGPT (your ChatGPT account)",
     "ollama": "Local model (Ollama, free)",
 }
+
+SHORT = {"claude": "Claude", "chatgpt": "ChatGPT", "ollama": "Ollama"}
+
+# Engine states, shown as badges in the popup's engine picker.
+READY, NOT_INSTALLED, NOT_SIGNED_IN, NOT_RUNNING, NEEDS_MODEL = (
+    "ready", "not_installed", "not_signed_in", "not_running", "needs_model")
+BADGES = {NOT_INSTALLED: "not installed", NOT_SIGNED_IN: "sign in",
+          NOT_RUNNING: "not running", NEEDS_MODEL: "needs model"}
 
 TIMEOUT = 90
 
@@ -30,30 +38,83 @@ class EngineError(Exception):
     pass
 
 
-def _find(name: str):
+class NeedsSetup(EngineError):
+    """The engine isn't installed / signed in / running yet; the popup shows a setup button."""
+
+    def __init__(self, engine: str, state: str, model: str = ""):
+        self.engine, self.state, self.model = engine, state, model
+        super().__init__(f"{engine}: {state}")
+
+
+def find(name: str):
     found = shutil.which(name)
     if found:
         return found
     home = os.path.expanduser("~")
+    local = os.environ.get("LOCALAPPDATA", os.path.join(home, "AppData", "Local"))
     extra = [
         os.path.join(home, ".local", "bin"),
         os.path.join(home, ".claude", "local"),
         os.path.join(home, ".npm-global", "bin"),
         os.path.join(home, "AppData", "Roaming", "npm"),
-        os.path.join(home, "AppData", "Local", "Programs", "claude"),
+        os.path.join(local, "Programs", "claude"),
+        os.path.join(local, "Programs", "Ollama"),
         "/usr/local/bin",
     ]
     return shutil.which(name, path=os.pathsep.join(extra))
 
 
+_find = find
+
+
+def ollama_installed() -> bool:
+    return find("ollama") is not None
+
+
 def available(engine: str) -> bool:
     if engine == "claude":
-        return _find("claude") is not None
+        return find("claude") is not None
     if engine == "chatgpt":
-        return _find("codex") is not None
+        return find("codex") is not None
     if engine == "ollama":
-        return _find("ollama") is not None
+        return ollama_installed()
     return False
+
+
+def status(engine: str, cfg: dict) -> str:
+    """READY, or what's missing. Takes up to a few seconds (runs the CLI's own status command)."""
+    if engine == "claude":
+        exe = find("claude")
+        if not exe:
+            return NOT_INSTALLED
+        try:
+            r = _run([exe, "auth", "status", "--json"], None, timeout=15)
+            return READY if json.loads(r.stdout or "{}").get("loggedIn") else NOT_SIGNED_IN
+        except (EngineError, ValueError):
+            return NOT_SIGNED_IN
+    if engine == "chatgpt":
+        exe = find("codex")
+        if not exe:
+            return NOT_INSTALLED
+        try:
+            return READY if _run([exe, "login", "status"], None, timeout=15).returncode == 0 else NOT_SIGNED_IN
+        except EngineError:
+            return NOT_SIGNED_IN
+    if engine == "ollama":
+        try:
+            names = ollama_models(cfg)
+        except OSError:
+            return NOT_RUNNING if ollama_installed() else NOT_INSTALLED
+        model = cfg.get("ollama_model", "llama3.2")
+        wanted = model if ":" in model else model + ":latest"
+        return READY if wanted in names or model in names else NEEDS_MODEL
+    return NOT_INSTALLED
+
+
+def ollama_models(cfg: dict) -> list:
+    url = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/tags"
+    with urllib.request.urlopen(url, timeout=2) as resp:
+        return [m.get("name", "") for m in json.loads(resp.read().decode("utf-8")).get("models", [])]
 
 
 def default_engine() -> str:
@@ -63,17 +124,18 @@ def default_engine() -> str:
     return "claude"
 
 
-def _run(cmd, stdin_text: str):
+def _run(cmd, stdin_text, timeout=TIMEOUT):
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW: no console flash under pythonw
     try:
         return subprocess.run(
-            cmd, input=stdin_text, capture_output=True, text=True, encoding="utf-8",
-            timeout=TIMEOUT, cwd=tempfile.gettempdir(), **kwargs,
+            cmd, input=stdin_text, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, cwd=tempfile.gettempdir(),
+            stdin=None if stdin_text is not None else subprocess.DEVNULL, **kwargs,
         )
     except subprocess.TimeoutExpired:
-        raise EngineError(f"{os.path.basename(cmd[0])} took longer than {TIMEOUT} s.")
+        raise EngineError(f"{os.path.basename(cmd[0])} took longer than {timeout} s.")
     except OSError as e:
         raise EngineError(f"Couldn't start {cmd[0]}: {e}")
 
@@ -86,7 +148,7 @@ def _looks_like_auth_error(text: str) -> bool:
 def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
     exe = _find("claude")
     if not exe:
-        raise EngineError("Claude Code isn't installed. Install it from claude.com/code, run `claude` once and sign in.")
+        raise NeedsSetup("claude", "not_installed")
     # Instructions go in through stdin: Windows .cmd launchers mangle multi-line arguments.
     cmd = [exe, "-p", "--model", cfg.get("claude_model", "haiku"),
            "--tools", "", "--safe-mode", "--no-session-persistence"]
@@ -95,7 +157,7 @@ def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
     if r.returncode != 0 or not out:
         err = (r.stderr or "") + out
         if _looks_like_auth_error(err):
-            raise EngineError("Claude Code isn't signed in. Run `claude` in a terminal and sign in.")
+            raise NeedsSetup("claude", "not_signed_in")
         raise EngineError("Claude Code failed: " + (err.strip().splitlines() or ["unknown error"])[0][:200])
     return out
 
@@ -103,11 +165,11 @@ def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
 def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
     exe = _find("codex")
     if not exe:
-        raise EngineError("Codex CLI isn't installed. Install it (npm i -g @openai/codex), then run `codex login`.")
+        raise NeedsSetup("chatgpt", "not_installed")
     fd, out_file = tempfile.mkstemp(prefix="rephrase-", suffix=".txt")
     os.close(fd)
     try:
-        cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never",
+        cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never",
                "-c", "model_reasoning_effort=low", "--output-last-message", out_file, "-"]
         r = _run(cmd, prompts.instructions(mode) + "\n\n" + prompts.wrap(text))
         try:
@@ -118,7 +180,7 @@ def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
         if r.returncode != 0 or not answer:
             err = (r.stderr or "") + (r.stdout or "")
             if _looks_like_auth_error(err):
-                raise EngineError("Codex isn't signed in. Run `codex login` and sign in with ChatGPT.")
+                raise NeedsSetup("chatgpt", "not_signed_in")
             raise EngineError("Codex failed: " + (err.strip().splitlines() or ["unknown error"])[-1][:200])
         return answer
     finally:
@@ -145,10 +207,10 @@ def rewrite_ollama(text: str, mode: str, cfg: dict) -> str:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            raise EngineError(f"Ollama model not found. Run: ollama pull {cfg.get('ollama_model', 'llama3.2')}")
+            raise NeedsSetup("ollama", "needs_model", cfg.get("ollama_model", "llama3.2"))
         raise EngineError(f"Ollama error {e.code}.")
     except (urllib.error.URLError, OSError):
-        raise EngineError("Ollama isn't running. Install it from ollama.com and start it.")
+        raise NeedsSetup("ollama", "not_running" if ollama_installed() else "not_installed")
     return data.get("message", {}).get("content", "").strip()
 
 

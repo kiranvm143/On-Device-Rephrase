@@ -53,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         badge.shouldShow = { [weak self] in self?.popup.isShowing == false }
         badge.start()
 
+        EngineSetup.shared.onReady = { [weak self] kind in self?.popup.engineReady(kind) }
+
         LoginItem.enableOnFirstRun()
 
         // `--demo`: show the popup with sample text, without touching other apps.

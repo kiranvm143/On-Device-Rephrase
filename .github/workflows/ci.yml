@@ -25,7 +25,7 @@ jobs:
         # No display on CI: every module must still import (pynput/Tk only load when the app runs).
         run: |
           rephrase --version
-          python -c "from rephrase import app, popup, textio, prompts, engines; assert prompts.clean('hey i am here', 'x') == 'Hey I am here'; print(engines.default_engine())"
+          python -c "from rephrase import app, popup, textio, prompts, engines, enginesetup; assert prompts.clean('hey i am here', 'x') == 'Hey I am here'; print(engines.default_engine())"
           rephrase --trigger || echo "trigger correctly reports Rephrase isn't running"
           python -m compileall -q desktop/rephrase
 
