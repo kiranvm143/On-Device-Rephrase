@@ -7,7 +7,6 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--test" {
     let picked = extra.compactMap(RewriteMode.init(rawValue:))
     let modes = picked.isEmpty ? RewriteMode.allCases : picked
     let engine = extra.compactMap(EngineKind.init(rawValue:)).first ?? RewriteEngine.shared.kind
-    let done = DispatchSemaphore(value: 0)
     Task {
         for mode in modes {
             let start = Date()
@@ -18,10 +17,9 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--test" {
                 print("[\(engine.rawValue) \(mode.title)] error: \(error.localizedDescription)")
             }
         }
-        done.signal()
+        exit(0)
     }
-    done.wait()
-    exit(0)
+    dispatchMain()   // keep the main thread free: setup progress is reported on it
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--probe"), i + 1 < CommandLine.arguments.count {

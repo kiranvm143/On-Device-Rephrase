@@ -239,6 +239,7 @@ final class PopupController {
 
 private struct PopupView: View {
     @ObservedObject var model: PopupModel
+    @ObservedObject private var setup = EngineSetup.shared
     let onReplace: () -> Void
     let onCopy: () -> Void
     let onClose: () -> Void
@@ -289,8 +290,18 @@ private struct PopupView: View {
         switch model.current {
         case .loading:
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(RewriteEngine.shared.kind.busyLabel).foregroundStyle(.secondary)
+                // A one-time setup (like ChatGPT's download) shows its own progress here.
+                if let activity = setup.activity {
+                    if let p = setup.progress {
+                        ProgressView(value: p).frame(width: 120)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(activity).foregroundStyle(.secondary)
+                } else {
+                    ProgressView().controlSize(.small)
+                    Text(model.engine.busyLabel).foregroundStyle(.secondary)
+                }
             }
         case .failed(let message):
             Text(message).foregroundStyle(.red)

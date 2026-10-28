@@ -99,6 +99,11 @@ final class EngineSetup: ObservableObject {
     /// A rewrite just found out the engine isn't ready; remember it so the right button shows.
     func record(_ kind: EngineKind, _ state: EngineState) { states[kind] = state }
 
+    // Progress for work started outside a button (e.g. the ChatGPT engine's one-time download).
+    func begin(_ text: String) { activity = text; progress = nil; lastError = nil }
+    func update(_ text: String, progress value: Double?) { activity = text; progress = value }
+    func end() { activity = nil; progress = nil }
+
     func refreshAll() {
         for kind in EngineKind.allCases { Task { await refresh(kind) } }
     }
@@ -125,8 +130,9 @@ final class EngineSetup: ObservableObject {
             switch (kind, state) {
             case (.claude, .notInstalled): await installClaude()
             case (.claude, _): await signIn(kind, args: ["auth", "login"], tool: "claude")
-            case (.chatgpt, .notInstalled): await installCodex()
-            case (.chatgpt, _): await signIn(kind, args: ["login"], tool: "codex")
+            case (.chatgpt, _):
+                // Get Rephrase's own Codex if needed (no install step for you), then sign in.
+                if await getCodex() { await signIn(kind, args: ["login"], tool: "codex") }
             case (.ollama, .notInstalled): await installOllama()
             case (.ollama, .notRunning): await startOllama()
             case (.ollama, .needsModel): await pullModel()
@@ -152,18 +158,15 @@ final class EngineSetup: ObservableObject {
         if CLIEngine.find("claude") == nil { lastError = "Couldn't install Claude Code. See claude.com/product/claude-code." }
     }
 
-    private func installCodex() async {
-        activity = "Installing Codex…"
-        if let npm = CLIEngine.find("npm") {
-            await runLogged(npm, ["install", "-g", "@openai/codex"], timeout: 600)
-        } else if let brew = CLIEngine.find("brew") {
-            await runLogged(brew, ["install", "--cask", "codex"], timeout: 900)
-        } else {
-            NSWorkspace.shared.open(URL(string: "https://github.com/openai/codex#installation")!)
-            lastError = "Install Codex from the page that just opened, then click Check again."
-            return
+    /// Returns false (with lastError set) if the one-time Codex download failed.
+    private func getCodex() async -> Bool {
+        do {
+            _ = try await CLIEngine.ensureCodex()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
         }
-        if CLIEngine.find("codex") == nil { lastError = "Couldn't install Codex automatically." }
     }
 
     private func installOllama() async {

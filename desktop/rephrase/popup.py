@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from . import engines, enginesetup, prompts, textio
+from . import codexdl, engines, enginesetup, prompts, textio
 
 WIDTH, HEIGHT = 560, 250
 BG, SELECTED, MUTED, RED, GREEN = "#f7f7f7", "#dde7f7", "#888", "#c62828", "#1b7f3b"
@@ -30,6 +30,7 @@ class Popup:
         self.statuses = {}                  # engine -> state, for the picker's badges
         self.queue = queue.Queue()
         self._was_busy = False
+        self._loading_text = ""
         ui_font = ("Segoe UI", 11) if root.tk.call("tk", "windowingsystem") == "win32" else ("Sans", 11)
 
         win = self.win = tk.Toplevel(root)
@@ -240,6 +241,9 @@ class Popup:
         if self._was_busy and not self.runner.busy:
             self.check_again()
         self._was_busy = self.runner.busy
+        if self.mode not in self.results and \
+                (codexdl.STATUS["text"] or f"Asking {engines.SHORT[self.engine]}…") != self._loading_text:
+            self._render()   # download progress changed
         self._render_setup_progress()
         self.win.after(100, self._poll)
 
@@ -261,7 +265,9 @@ class Popup:
         v.configure(state="normal")
         v.delete("1.0", "end")
         if result is None:
-            v.insert("end", f"Asking {engines.SHORT[self.engine]}…", "muted")
+            # A one-time setup (ChatGPT's Codex download) shows its progress here.
+            self._loading_text = codexdl.STATUS["text"] or f"Asking {engines.SHORT[self.engine]}…"
+            v.insert("end", self._loading_text, "muted")
         elif result[0] == "error":
             v.insert("end", result[1], "error")
         elif self.mode == "fix":

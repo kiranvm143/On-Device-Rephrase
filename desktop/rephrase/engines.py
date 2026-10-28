@@ -13,7 +13,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-from . import prompts
+from . import codexdl, prompts
 
 ENGINES = ["claude", "chatgpt", "ollama"]
 
@@ -60,6 +60,7 @@ def find(name: str):
         os.path.join(local, "Programs", "claude"),
         os.path.join(local, "Programs", "Ollama"),
         "/usr/local/bin",
+        os.path.dirname(codexdl.managed_path()),
     ]
     return shutil.which(name, path=os.pathsep.join(extra))
 
@@ -75,7 +76,7 @@ def available(engine: str) -> bool:
     if engine == "claude":
         return find("claude") is not None
     if engine == "chatgpt":
-        return find("codex") is not None
+        return find("codex") is not None or codexdl.has_chatgpt_sign_in()
     if engine == "ollama":
         return ollama_installed()
     return False
@@ -94,8 +95,8 @@ def status(engine: str, cfg: dict) -> str:
             return NOT_SIGNED_IN
     if engine == "chatgpt":
         exe = find("codex")
-        if not exe:
-            return NOT_INSTALLED
+        if not exe:   # Rephrase downloads its own Codex on first use; only the sign-in matters
+            return READY if codexdl.has_chatgpt_sign_in() else NOT_SIGNED_IN
         try:
             return READY if _run([exe, "login", "status"], None, timeout=15).returncode == 0 else NOT_SIGNED_IN
         except EngineError:
@@ -163,9 +164,10 @@ def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
 
 
 def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
-    exe = _find("codex")
-    if not exe:
-        raise NeedsSetup("chatgpt", "not_installed")
+    try:
+        exe = codexdl.ensure()   # one-time download of Rephrase's own Codex if there's none
+    except (OSError, ValueError) as e:
+        raise EngineError(f"Couldn't set up ChatGPT: {e}")
     fd, out_file = tempfile.mkstemp(prefix="rephrase-", suffix=".txt")
     os.close(fd)
     try:

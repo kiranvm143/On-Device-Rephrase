@@ -16,7 +16,7 @@ import time
 import urllib.request
 import webbrowser
 
-from . import config, engines
+from . import codexdl, config, engines
 from .engines import NEEDS_MODEL, NOT_INSTALLED, NOT_RUNNING, NOT_SIGNED_IN
 
 WIN = sys.platform == "win32"
@@ -107,15 +107,23 @@ def perform(engine: str, state: str, cfg: dict, report) -> str:
             config.log(f"setup: install claude exit={r.returncode}")
             return "" if engines.find("claude") else "Couldn't install Claude Code. See claude.com/product/claude-code."
 
-        if engine == "chatgpt" and state == NOT_INSTALLED:
-            npm = engines.find("npm")
-            if not npm:
-                webbrowser.open("https://github.com/openai/codex#installation")
-                return "Install Node.js (nodejs.org) or Codex from the page that opened, then click Check again."
-            report("Installing Codex…", None)
-            r = _run([npm, "install", "-g", "@openai/codex"], 600)
-            config.log(f"setup: install codex exit={r.returncode}")
-            return "" if engines.find("codex") else "Couldn't install Codex: " + (r.stderr.strip().splitlines() or ["npm failed"])[-1][:160]
+        if engine == "chatgpt" and state in (NOT_INSTALLED, NOT_SIGNED_IN):
+            # Rephrase's own Codex (one-time download, no install step), then sign in.
+            report("Setting up ChatGPT… (one-time download)", None)
+            stop = threading.Event()
+
+            def mirror():   # show the download's progress on the setup panel
+                while not stop.wait(0.2):
+                    if codexdl.STATUS["text"]:
+                        report(codexdl.STATUS["text"], codexdl.STATUS["progress"])
+            threading.Thread(target=mirror, daemon=True).start()
+            try:
+                codexdl.ensure()
+            finally:
+                stop.set()
+            if codexdl.has_chatgpt_sign_in():
+                return ""
+            state = NOT_SIGNED_IN
 
         if engine in ("claude", "chatgpt") and state == NOT_SIGNED_IN:
             exe = engines.find("claude" if engine == "claude" else "codex")

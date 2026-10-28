@@ -68,10 +68,14 @@ Pick an engine from the name at the top right of the popup. If it isn't ready, t
 |---|---|---|---|
 | **Apple on-device** (default on Mac) | Mac | Nothing — opens Settings if Apple Intelligence is off | Free, offline |
 | **Claude** | All | **Install Claude Code** (Anthropic's installer) → **Sign in to Claude** in your browser | Your Claude plan |
-| **ChatGPT** | All | **Install Codex** (via npm or Homebrew) → **Sign in with ChatGPT** in your browser | Your ChatGPT plan |
+| **ChatGPT** | All | Nothing to install: **Sign in with ChatGPT** in your browser (skipped if you've signed in to Codex before) | Your ChatGPT plan |
 | **Local (Ollama)** | All | **Install Ollama** → **Start Ollama** → **Download model** (~2 GB, with progress) | Free, offline |
 
-Installing Codex needs Node.js (or Homebrew on Mac); installing Ollama on Linux opens its download page.
+For ChatGPT, Rephrase keeps its own copy of OpenAI's Codex CLI: the first time you use it, it downloads it
+(about 100 MB, once) from [OpenAI's GitHub releases](https://github.com/openai/codex/releases), checks it against
+the published SHA-256, and stores it in Rephrase's settings folder. Each ChatGPT rewrite then takes about 8–10 s.
+Claude Code needs a paid Claude plan (Pro, Max, or a Team/Enterprise plan that includes it).
+Installing Ollama on Linux opens its download page.
 
 **How the Claude and ChatGPT logins work:** Rephrase runs the official `claude` or `codex` program on your computer,
 in a no-tools, text-only mode, and reads its answer. Signing in runs their own `claude auth login` / `codex login`,

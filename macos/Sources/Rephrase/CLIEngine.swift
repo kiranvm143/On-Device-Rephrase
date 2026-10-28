@@ -22,7 +22,8 @@ enum CLIEngine {
     }
 
     static func chatgpt(instructions: String, prompt: String) async throws -> String {
-        guard let path = find("codex") else { throw RewriteError.needsSetup(.chatgpt, .notInstalled) }
+        // No Codex yet? Fetch Rephrase's own copy (one time), showing progress in the popup.
+        let path = try await ensureCodex()
         let outFile = FileManager.default.temporaryDirectory.appendingPathComponent("rephrase-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: outFile) }
         let args = [
@@ -55,9 +56,34 @@ enum CLIEngine {
     }
 
     static func chatgptStatus() async -> EngineState {
-        guard let path = find("codex") else { return .notInstalled }
+        // Without Codex yet, a ChatGPT sign-in from any Codex on this Mac is enough: our copy downloads on first use.
+        guard let path = find("codex") else { return CodexDownloader.hasChatGPTSignIn ? .ready : .notSignedIn }
         guard let (_, _, status) = try? await run(path, ["login", "status"], stdin: nil, timeout: 15) else { return .notSignedIn }
         return status == 0 ? .ready : .notSignedIn
+    }
+
+    /// Codex's path, downloading Rephrase's own copy first if there's none on this Mac.
+    static func ensureCodex() async throws -> String {
+        if let path = find("codex") { return path }
+        await EngineSetup.shared.begin("Setting up ChatGPT… (one-time download)")
+        do {
+            let path = try await CodexDownloader.ensure { fraction in
+                Task { @MainActor in
+                    if fraction < 0 {
+                        EngineSetup.shared.update("Setting up ChatGPT… unpacking", progress: nil)
+                    } else {
+                        EngineSetup.shared.update("Setting up ChatGPT… \(Int(fraction * 100))% (one-time download)",
+                                                  progress: fraction)
+                    }
+                }
+            }
+            await EngineSetup.shared.end()
+            return path
+        } catch {
+            await EngineSetup.shared.end()
+            Log.write("codex: download failed: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     // MARK: - Process helpers
@@ -81,7 +107,8 @@ enum CLIEngine {
     }()
 
     static func find(_ name: String) -> String? {
-        let dirs = shellPath.split(separator: ":").map(String.init) + [npmGlobalBin].compactMap { $0 }
+        let ownBin = (CodexDownloader.managedPath as NSString).deletingLastPathComponent
+        let dirs = shellPath.split(separator: ":").map(String.init) + [npmGlobalBin, ownBin].compactMap { $0 }
         for dir in dirs {
             let candidate = "\(dir)/\(name)"
             if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
