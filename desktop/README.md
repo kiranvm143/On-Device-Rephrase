@@ -1,7 +1,8 @@
 # Rephrase for Windows and Linux
 
 Select text in any app, press **Ctrl+Alt+R**, pick a rewrite, press Enter to replace it.
-See the [main README](../README.md) for install commands.
+See the [main README](../README.md) for install commands, the [User Guide](../docs/USER_GUIDE.md) for how to use
+it, and the [Developer Guide](../docs/DEVELOPER_GUIDE.md#4-windows--linux-app) for how this app works.
 
 ```bash
 pip install .           # from this folder
