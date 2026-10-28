@@ -1,0 +1,13 @@
+# Swift
+macos/.build/
+macos/build/
+
+# Python
+__pycache__/
+*.egg-info/
+build/
+dist/
+*.spec
+.venv/
+
+.DS_Store

@@ -1,0 +1,61 @@
+name: Release
+
+# Push a tag like v0.1.0 to build downloadable apps and attach them to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: Build ${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows, file: Rephrase.exe, asset: Rephrase-Windows.exe }
+          - { os: ubuntu-22.04, name: Linux, file: Rephrase, asset: Rephrase-Linux-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ./desktop pyinstaller
+      - run: pyinstaller --onefile --noconsole --name Rephrase desktop/launcher.py
+      - run: mv dist/${{ matrix.file }} dist/${{ matrix.asset }}
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  macos:
+    name: Build macOS
+    # Needs the macOS 26 SDK (Foundation Models). If this runner image isn't available yet,
+    # the release still ships Windows/Linux, and the Mac installer builds from source instead.
+    runs-on: macos-26
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./macos/build.sh
+      - run: ditto -c -k --keepParent macos/build/Rephrase.app Rephrase-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rephrase-macOS.zip
+          path: Rephrase-macOS.zip
+
+  release:
+    needs: [desktop, macos]
+    if: ${{ !cancelled() && needs.desktop.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          generate_release_notes: true

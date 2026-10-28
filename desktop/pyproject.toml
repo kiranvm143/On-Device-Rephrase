@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rephrase-desktop"
+version = "0.1.0"
+description = "Rephrase for Windows and Linux: select text anywhere, press a hotkey, get rewrites from Claude, ChatGPT or a local model."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "pynput>=1.7",
+    "pyperclip>=1.8",
+    "pystray>=0.19",
+    "Pillow>=9",
+]
+
+[project.scripts]
+rephrase = "rephrase.app:main"
+
+[project.gui-scripts]
+rephrase-gui = "rephrase.app:main"
+
+[tool.setuptools]
+packages = ["rephrase"]
