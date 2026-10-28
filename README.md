@@ -31,8 +31,17 @@ irm https://raw.githubusercontent.com/kiranvm143/On-Device-Rephrase/main/install
 curl -fsSL https://raw.githubusercontent.com/kiranvm143/On-Device-Rephrase/main/install/install.sh | bash
 ```
 
-Prefer a download? Tagged versions attach ready-to-run apps on the
-[Releases](https://github.com/kiranvm143/On-Device-Rephrase/releases) page.
+Prefer a download? Get the app for your system from the
+[latest release](https://github.com/kiranvm143/On-Device-Rephrase/releases/latest). The apps aren't signed by
+Apple or Microsoft yet, so the first launch needs one extra step:
+
+- **Mac** (`Rephrase-macOS.zip`): unzip, move `Rephrase.app` to Applications, open it; when macOS blocks it, go to
+  **System Settings → Privacy & Security** and click **Open Anyway**.
+- **Windows** (`Rephrase-Windows.exe`): if SmartScreen appears, click **More info → Run anyway**.
+- **Linux** (`Rephrase-Linux-x86_64`): `chmod +x Rephrase-Linux-x86_64 && ./Rephrase-Linux-x86_64`
+  (needs `xclip` and `xdotool` on X11).
+
+The one-line installers avoid these warnings and also set up start-at-login.
 
 All installers start Rephrase right away and set it to start when you log in.
 
