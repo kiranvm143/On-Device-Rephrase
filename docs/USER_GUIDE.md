@@ -2,19 +2,21 @@
 
 Rephrase fixes and rewrites your writing in any app: email, chat, documents, browsers, Teams, Zoom and more.
 Select some text (or just type in a text box), open Rephrase, pick a rewrite, and press Enter to replace your text.
+It can also draft a reply to the messages on screen in Teams, Slack, Zoom and other chat apps.
 
 **Contents**
 
 1. [Install](#1-install)
 2. [First launch](#2-first-launch)
 3. [Rewrite text](#3-rewrite-text)
-4. [Choose an AI engine](#4-choose-an-ai-engine)
-5. [The menu-bar and tray menus](#5-the-menu-bar-and-tray-menus)
-6. [Settings](#6-settings)
-7. [Privacy](#7-privacy)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Update and uninstall](#9-update-and-uninstall)
-10. [FAQ](#10-faq)
+4. [Draft a reply](#4-draft-a-reply)
+5. [Choose an AI engine](#5-choose-an-ai-engine)
+6. [The menu-bar and tray menus](#6-the-menu-bar-and-tray-menus)
+7. [Settings](#7-settings)
+8. [Privacy](#8-privacy)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Update and uninstall](#10-update-and-uninstall)
+11. [FAQ](#11-faq)
 
 ---
 
@@ -79,7 +81,7 @@ The downloaded apps don't set up start-at-login. On Mac you can turn it on from 
 ### Windows and Linux
 
 1. Rephrase appears as a blue **R** in the system tray (Windows: bottom right, maybe under the **^** arrow).
-2. Pick an engine the first time you open the popup (see [Choose an AI engine](#4-choose-an-ai-engine)).
+2. Pick an engine the first time you open the popup (see [Choose an AI engine](#5-choose-an-ai-engine)).
    Windows and Linux have no built-in AI, so you'll use ChatGPT, Claude, or the free local Ollama.
 
 ---
@@ -92,7 +94,7 @@ The downloaded apps don't set up start-at-login. On Mac you can turn it on from 
 |---|---|---|
 | **Click the ✨ icon** | Appears at the edge of the text box you're typing in | — |
 | **Hotkey** | Select text, press **⌃⌥R** (Control + Option + R) | Select text, press **Ctrl + Alt + R** |
-| **From the menu** | Menu-bar icon → **Rephrase Selection** | Tray icon → **Rephrase Selection** |
+| **From the menu** | Menu-bar icon → **Rephrase or Reply** | Tray icon → **Rephrase Selection** |
 
 On Mac, if nothing is selected, Rephrase uses everything in the text box.
 
@@ -114,16 +116,16 @@ On Mac, if nothing is selected, Rephrase uses everything in the text box.
 |---|---|---|
 | Replace your text with the rewrite | `↩` | `Enter` |
 | Copy the rewrite instead | `⌘C` | `Ctrl+C` |
-| Switch mode | `1`–`5`, or `Tab` / `Shift+Tab` | `1`–`5`, or `Tab` / `Shift+Tab` |
-| Try the same mode again | `r` | — |
+| Switch mode | `1`–`6`, or `Tab` / `Shift+Tab` | `1`–`6`, or `Tab` / `Shift+Tab` |
+| Try the same mode again (or a new reply draft) | `r` | `r` |
 | Close | `esc`, or click anywhere else | `Esc`, or click anywhere else |
 
 Replacing and copying don't overwrite what you had on the clipboard: Rephrase puts it back afterwards.
 
 ### The ✨ icon (Mac)
 
-- It appears when the cursor is in a text box that has some text in it, and hides in password fields, terminals and
-  password managers.
+- It appears when the cursor is in a text box that has some text in it (in chat apps, also when the box is empty, for
+  [replies](#4-draft-a-reply)), and hides in password fields, terminals and password managers.
 - **Move it:** if it covers a button, press and hold it, then drag it anywhere. Rephrase remembers the spot for each
   app. To put every icon back: menu-bar icon → **Reset Icon Positions**.
 - **Turn it off:** menu-bar icon → **Show Icon in Text Boxes**. The hotkey still works.
@@ -132,7 +134,57 @@ Replacing and copying don't overwrite what you had on the clipboard: Rephrase pu
 
 ---
 
-## 4. Choose an AI engine
+## 4. Draft a reply
+
+Rephrase can read the last messages in a conversation and write your answer. It never sends anything: the reply goes
+into the message box (or onto the clipboard) and you decide whether to send it.
+
+![The Rephrase popup drafting a reply](images/popup-reply.png)
+
+### Mac
+
+1. Click into the message box in Teams, Slack, Zoom, Messages, WhatsApp or another chat app (or a reply box in your
+   browser).
+2. Click the ✨ icon, or press **⌃⌥R**. With an empty box, the popup opens on **Reply** and drafts an answer to the
+   messages on screen.
+3. Press **↩** to put the draft in the message box, `r` for a different draft, or `esc` to close. Then edit it and
+   send it as usual.
+
+**Tell it what to say.** Type a few words first, like `yes but next week`, then open the popup and pick **Reply**
+(or press `6`). Rephrase turns your notes into a full reply to the conversation.
+
+**Reply to specific messages.** Select the messages you want to answer and press **⌃⌥R**. In chat apps the popup
+opens on **Reply**; press **↩** to copy the draft, then click the message box and press **⌘V**.
+
+**How Rephrase reads the conversation.** It reads the messages visible above the message box, in that box's column
+(so the channel list and other panes are left out), up to about the last 4,000 characters.
+
+- Most apps (Teams, Slack, Messages, WhatsApp, browsers) share their text with Accessibility, the permission
+  Rephrase already has.
+- **Zoom** hides its messages, so there Rephrase reads the text visible in the window instead, with Apple's
+  on-device text recognition. The first time, the popup asks you to allow **screen reading**: click
+  **Allow Screen Reading…**, turn on **Rephrase** under **Screen & System Audio Recording**, and press **⌃⌥R** again
+  (if it still asks, click **Reopen Rephrase**). In Zoom, click into the message box and type something first so
+  Rephrase knows where the box is, or select the messages instead.
+
+### Windows and Linux
+
+Rephrase can't read other apps' messages there yet, so you choose them:
+
+1. Select the messages you want to answer and press **Ctrl + Alt + R**.
+2. Click **Reply** (or press `6`).
+3. Press **Enter** to copy the draft, then click the message box and press **Ctrl+V**.
+
+### Tips
+
+- Drafts match the conversation's language and tone and are kept short, like a normal chat message.
+- Rephrase doesn't know your plans, so drafts avoid making promises or claims for you. Where a detail is needed, they
+  leave a placeholder like `[time]` for you to fill in.
+- Your name tells Rephrase which messages are yours (on Mac, the name of your user account).
+
+---
+
+## 5. Choose an AI engine
 
 Click the engine name at the **top right of the popup** (for example **Apple ⌄**) and pick one. Your choice is
 remembered. Engines that aren't ready show what's missing, such as "— sign in" or "— not installed".
@@ -167,17 +219,18 @@ Click **Check again** at any time to re-check an engine.
 
 ---
 
-## 5. The menu-bar and tray menus
+## 6. The menu-bar and tray menus
 
 ### Mac menu bar
 
 | Item | What it does |
 |---|---|
-| **Rephrase Selection (⌃⌥R)** | Opens the popup for the selected text |
+| **Rephrase or Reply (⌃⌥R)** | Opens the popup for the selected text, or for a reply in an empty message box |
 | **Show Icon in Text Boxes** | Turns the ✨ icon on or off |
 | **Reset Icon Positions** | Puts icons you dragged back in their default spot |
 | **Open at Login** | Starts Rephrase when you log in |
 | **Accessibility: allowed ✓** | Shows whether Rephrase has permission; click to open Settings |
+| **Screen reading for replies** | Whether Rephrase may read the screen, needed only for replies in Zoom; click to allow it |
 | **Engine** | Chooses the engine (same as the popup's picker) |
 | **Quit Rephrase** | Quits |
 
@@ -187,12 +240,12 @@ Click **Check again** at any time to re-check an engine.
 |---|---|
 | **Rephrase Selection** | Opens the popup for the selected text |
 | **Engine** | Chooses the engine |
-| **Open Settings File** | Opens `config.json` (see [Settings](#6-settings)) |
+| **Open Settings File** | Opens `config.json` (see [Settings](#7-settings)) |
 | **Quit Rephrase** | Quits |
 
 ---
 
-## 6. Settings
+## 7. Settings
 
 Most settings are in the menus. A few extras:
 
@@ -229,11 +282,15 @@ Wayland doesn't let apps use global hotkeys or type into other apps. Rephrase wo
 
 ---
 
-## 7. Privacy
+## 8. Privacy
 
 - **Apple on-device** and **Ollama** never send your text anywhere.
 - **ChatGPT** and **Claude** send only the text you're rewriting to OpenAI or Anthropic, as if you'd pasted it into
-  their apps, under your account and their privacy terms.
+  their apps, under your account and their privacy terms. For a reply, that's the messages Rephrase read (the ones
+  visible on screen, or the ones you selected), so use Apple on-device or Ollama for conversations that must stay
+  private.
+- To draft a reply, Rephrase reads the conversation only when you ask for a reply, keeps it only while the popup is
+  open, and never saves it. Screen reading (Zoom) happens on your Mac.
 - Rephrase skips password fields, terminals and password managers.
 - Logs record what happened (for example "AXTextArea 62 chars"), never your text.
 - On Mac, for apps like Zoom that hide their text boxes, Rephrase notes *that* you're typing, never which keys.
@@ -241,7 +298,7 @@ Wayland doesn't let apps use global hotkeys or type into other apps. Rephrase wo
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -255,7 +312,10 @@ Wayland doesn't let apps use global hotkeys or type into other apps. Rephrase wo
 | **Ollama: "isn't running"** | Click **Start Ollama**, or open the Ollama app yourself. |
 | **Windows: popup doesn't take keystrokes** | Click inside the popup once, or use its buttons. |
 | **Linux: hotkey does nothing** | You may be on Wayland; see [Linux on Wayland](#linux-on-wayland). Otherwise check `xclip` and `xdotool` are installed. |
-| **Rewrite looks wrong** | Try another mode, press `r` (Mac) to retry, or switch engine. |
+| **Rewrite looks wrong** | Try another mode, press `r` to retry, or switch engine. |
+| **Reply: "Couldn't find any messages"** | The app didn't share its messages. Select the messages you want to answer, press **⌃⌥R** and choose **Reply**. |
+| **Reply: "Allow screen reading" keeps showing** | Turn on Rephrase in **System Settings → Privacy & Security → Screen & System Audio Recording**, then click **Reopen Rephrase**. |
+| **Reply answers the wrong part of the chat** | Scroll so the messages you're answering are visible, or select just those messages. |
 
 ### Logs
 
@@ -269,7 +329,7 @@ Please include the last lines in an [issue](https://github.com/kiranvm143/On-Dev
 
 ---
 
-## 9. Update and uninstall
+## 10. Update and uninstall
 
 **Update:** run the [install command](#option-a-one-line-install-recommended) again. Your settings and, on Mac, your
 Accessibility permission are kept.
@@ -286,7 +346,7 @@ Uninstalling Rephrase doesn't sign you out of ChatGPT or Claude, or remove Ollam
 
 ---
 
-## 10. FAQ
+## 11. FAQ
 
 **Do I need an API key?**
 No. Use Apple on-device or Ollama for free, or your existing ChatGPT or Claude account.
@@ -305,6 +365,9 @@ Yes, with Apple on-device or Ollama.
 **Which engine should I use?**
 Apple on-device for fast everyday fixes. ChatGPT or Claude when tone and wording matter most. Ollama if you want free
 and private on Windows or Linux.
+
+**Does Rephrase send replies for me?**
+No. It only drafts them. You always review, edit and send the message yourself.
 
 **Can I change the hotkey?**
 On Windows and Linux, yes: set `hotkey` in `config.json`. On Mac it's fixed at ⌃⌥R for now.

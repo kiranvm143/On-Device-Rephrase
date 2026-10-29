@@ -146,14 +146,14 @@ def _looks_like_auth_error(text: str) -> bool:
     return any(w in t for w in ("login", "log in", "sign in", "auth", "unauthorized", "401"))
 
 
-def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
+def ask_claude(system: str, user: str, temperature: float, cfg: dict) -> str:
     exe = _find("claude")
     if not exe:
         raise NeedsSetup("claude", "not_installed")
     # Instructions go in through stdin: Windows .cmd launchers mangle multi-line arguments.
     cmd = [exe, "-p", "--model", cfg.get("claude_model", "haiku"),
            "--tools", "", "--safe-mode", "--no-session-persistence"]
-    r = _run(cmd, prompts.instructions(mode) + "\n\n" + prompts.wrap(text))
+    r = _run(cmd, system + "\n\n" + user)
     out = (r.stdout or "").strip()
     if r.returncode != 0 or not out:
         err = (r.stderr or "") + out
@@ -163,7 +163,7 @@ def rewrite_claude(text: str, mode: str, cfg: dict) -> str:
     return out
 
 
-def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
+def ask_chatgpt(system: str, user: str, temperature: float, cfg: dict) -> str:
     try:
         exe = codexdl.ensure()   # one-time download of Rephrase's own Codex if there's none
     except (OSError, ValueError) as e:
@@ -173,7 +173,7 @@ def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
     try:
         cmd = [exe, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never",
                "-c", "model_reasoning_effort=low", "--output-last-message", out_file, "-"]
-        r = _run(cmd, prompts.instructions(mode) + "\n\n" + prompts.wrap(text))
+        r = _run(cmd, system + "\n\n" + user)
         try:
             with open(out_file, encoding="utf-8") as f:
                 answer = f.read().strip()
@@ -192,15 +192,15 @@ def rewrite_chatgpt(text: str, mode: str, cfg: dict) -> str:
             pass
 
 
-def rewrite_ollama(text: str, mode: str, cfg: dict) -> str:
+def ask_ollama(system: str, user: str, temperature: float, cfg: dict) -> str:
     body = json.dumps({
         "model": cfg.get("ollama_model", "llama3.2"),
         "stream": False,
         "messages": [
-            {"role": "system", "content": prompts.instructions(mode)},
-            {"role": "user", "content": prompts.wrap(text)},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
-        "options": {"temperature": 0.1 if mode == "fix" else 0.7},
+        "options": {"temperature": temperature},
     }).encode()
     url = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/chat"
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
@@ -216,6 +216,15 @@ def rewrite_ollama(text: str, mode: str, cfg: dict) -> str:
     return data.get("message", {}).get("content", "").strip()
 
 
+ASK = {"claude": ask_claude, "chatgpt": ask_chatgpt, "ollama": ask_ollama}
+
+
 def rewrite(text: str, mode: str, engine: str, cfg: dict) -> str:
-    fn = {"claude": rewrite_claude, "chatgpt": rewrite_chatgpt, "ollama": rewrite_ollama}[engine]
-    return prompts.clean(fn(text, mode, cfg), text)
+    out = ASK[engine](prompts.instructions(mode), prompts.wrap(text), 0.1 if mode == "fix" else 0.7, cfg)
+    return prompts.clean(out, text)
+
+
+def draft_reply(conversation: str, engine: str, cfg: dict) -> str:
+    """A reply to `conversation` (messages you selected), written as you."""
+    out = ASK[engine](prompts.reply_instructions(), prompts.wrap_conversation(conversation[-6000:]), 0.7, cfg)
+    return prompts.clean_reply(out)

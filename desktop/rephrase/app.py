@@ -163,7 +163,8 @@ class App:
             self.popup = None
 
         from .popup import Popup
-        self.popup = Popup(self.root, text, self.cfg, self.setup_runner, self.set_engine, on_replace, on_close)
+        self.popup = Popup(self.root, text, self.cfg, self.setup_runner, self.set_engine, on_replace, on_close,
+                           on_message=self.toast)
 
     def _setup_finished(self, engine, error):
         # With the popup open it re-checks on its own; otherwise say it's ready (or what went wrong).
@@ -207,11 +208,11 @@ class App:
 def _test(text, args):
     cfg = config.load()
     engine = next((a for a in args if a in engines.ENGINES), cfg.get("engine") or engines.default_engine())
-    modes = [a for a in args if a in prompts.MODES] or prompts.MODES
+    modes = [a for a in args if a in prompts.MODES] or prompts.REWRITES
     for mode in modes:
         start = time.time()
         try:
-            out = engines.rewrite(text, mode, engine, cfg)
+            out = engines.draft_reply(text, engine, cfg) if mode == "reply" else engines.rewrite(text, mode, engine, cfg)
             print(f"[{engine} {prompts.TITLES[mode]} {time.time() - start:.2f}s] {out}")
         except engines.EngineError as e:
             print(f"[{engine} {prompts.TITLES[mode]}] error: {e}")
@@ -221,7 +222,8 @@ def main():
     parser = argparse.ArgumentParser(prog="rephrase", description="Rewrite selected text anywhere.")
     parser.add_argument("--trigger", action="store_true", help="open the popup in the running Rephrase")
     parser.add_argument("--test", nargs="+", metavar=("TEXT", "ENGINE_OR_MODE"),
-                        help="rewrite TEXT in the terminal, e.g. --test 'i has went' claude fix")
+                        help="rewrite TEXT in the terminal, e.g. --test 'i has went' claude fix "
+                             "(with the mode reply, TEXT is a conversation to answer)")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args()
 

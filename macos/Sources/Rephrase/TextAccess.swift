@@ -10,6 +10,16 @@ struct CapturedText {
     let app: NSRunningApplication?
     /// We pressed ⌘A to capture, so closing without replacing should deselect again.
     var weSelectedAll = false
+    /// Came from a text box you can type in. Otherwise it's text you selected elsewhere,
+    /// such as messages to reply to, and can't be replaced in place.
+    var editable = true
+    /// The message box's frame in Accessibility coordinates (top-left origin), if known.
+    var inputFrame: CGRect?
+    /// Where you clicked to type, for apps that hide their text box (Accessibility coordinates).
+    var typingPoint: CGPoint?
+
+    /// Selected messages (not your own draft): Reply uses them as the conversation.
+    var isConversation: Bool { !editable && !text.isEmpty }
 }
 
 /// Reads the selected text in whatever app is in front, and writes the rewrite back.
@@ -50,12 +60,12 @@ enum TextAccess {
         return (nil, "AX error \(err.rawValue)")
     }
 
-    /// Frame (Cocoa coordinates) of the focused editable text box, if it has some text in it.
-    /// Password fields are never reported.
+    /// Frame (Cocoa coordinates) of the focused editable text box, if it has some text in it
+    /// (or even when empty, with `allowEmpty`). Password fields are never reported.
     /// The reason string explains why there's no frame (or what was found), for the log.
     /// `hidden` is true when the app hides what's focused (Zoom chat, ...), so a text box may still be there.
-    static func focusedTextField() -> (frame: NSRect?, reason: String, hidden: Bool) {
-        let (frame, reason) = findFocusedTextField()
+    static func focusedTextField(allowEmpty: Bool = false) -> (frame: NSRect?, reason: String, hidden: Bool) {
+        let (frame, reason) = findFocusedTextField(allowEmpty: allowEmpty)
         let hidden = frame == nil
             && (reason.hasPrefix("no focused element") || Self.opaqueRoles.contains { reason.contains("focused \($0) ") })
         return (frame, reason, hidden)
@@ -64,11 +74,10 @@ enum TextAccess {
     /// Roles that are just containers: if one of these has focus, the real text box may be invisible to AX.
     private static let opaqueRoles = ["AXGroup", "AXWebArea", "AXUnknown", "AXScrollArea", "AXWindow", "AXSplitGroup", "AXStaticText"]
 
-    private static func findFocusedTextField() -> (NSRect?, String) {
-        let app = NSWorkspace.shared.frontmostApplication
-        enableAccessibility(for: app)
+    /// The focused text box you can type in (possibly empty), or why there isn't one.
+    private static func focusedEditable(in app: NSRunningApplication?) -> (element: AXUIElement?, role: String, reason: String) {
         let (found, via) = focusedElement(in: app)
-        guard var focused = found else { return (nil, "no focused element (\(via))") }
+        guard var focused = found else { return (nil, "", "no focused element (\(via))") }
 
         // Web views: the focus may sit on a child inside a contenteditable box.
         var role: String = copyAttribute(focused, kAXRoleAttribute) ?? "?"
@@ -79,19 +88,41 @@ enum TextAccess {
         }
 
         let subrole: String = copyAttribute(focused, kAXSubroleAttribute) ?? ""
-        guard subrole != (kAXSecureTextFieldSubrole as String) else { return (nil, "password field") }
+        guard subrole != (kAXSecureTextFieldSubrole as String) else { return (nil, role, "password field") }
 
         var settable: DarwinBoolean = false
         AXUIElementIsAttributeSettable(focused, kAXValueAttribute as CFString, &settable)
         let textRoles: Set<String> = [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole]
-        guard textRoles.contains(role) || settable.boolValue else { return (nil, "focused \(role) is not a text box") }
+        guard textRoles.contains(role) || settable.boolValue else { return (nil, role, "focused \(role) is not a text box") }
+        return (focused, role, "via \(via)")
+    }
+
+    private static func findFocusedTextField(allowEmpty: Bool) -> (NSRect?, String) {
+        let app = NSWorkspace.shared.frontmostApplication
+        enableAccessibility(for: app)
+        let (found, role, reason) = focusedEditable(in: app)
+        guard let focused = found else { return (nil, reason) }
 
         let length: Int = copyAttribute(focused, kAXNumberOfCharactersAttribute)
             ?? (copyAttribute(focused, kAXValueAttribute) as String?)?.count ?? 0
-        guard length > 0 else { return (nil, "\(role) is empty") }
+        guard length > 0 || allowEmpty else { return (nil, "\(role) is empty") }
         guard let frame = frame(of: focused) else { return (nil, "\(role) has no position") }
         guard frame.width >= 40, frame.height >= 14 else { return (nil, "\(role) too small \(frame.size)") }
-        return (frame, "\(role) \(length) chars via \(via)")
+        return (frame, "\(role) \(length) chars \(reason)")
+    }
+
+    /// An empty message box to draft a reply into: the focused text box, or in chat apps that
+    /// hide theirs (Zoom), wherever the caret is. Nil when there's nowhere sensible to reply.
+    static func replyTarget(chatApp: Bool) -> CapturedText? {
+        let app = NSWorkspace.shared.frontmostApplication
+        enableAccessibility(for: app)
+        if let focused = focusedEditable(in: app).element {
+            var captured = CapturedText(text: "", wholeField: false,
+                                        anchor: elementBounds(focused) ?? mouseAnchor(), app: app)
+            captured.inputFrame = axFrame(of: focused)
+            return captured
+        }
+        return chatApp ? CapturedText(text: "", wholeField: false, anchor: mouseAnchor(), app: app) : nil
     }
 
     /// `selectAllIfEmpty`: when the app hides its text box and nothing is selected, press ⌘A first.
@@ -102,19 +133,28 @@ enum TextAccess {
 
         let focused = focusedElement(in: app).0
         let anchor = focused.flatMap(selectionBounds) ?? focused.flatMap(elementBounds) ?? mouseAnchor()
+        let input = focusedEditable(in: app).element
+        let inputFrame = input.flatMap(axFrame)
+
+        func captured(_ text: String, wholeField: Bool, editable: Bool) -> CapturedText {
+            var c = CapturedText(text: text, wholeField: wholeField, anchor: anchor, app: app)
+            c.editable = editable
+            c.inputFrame = inputFrame
+            return c
+        }
 
         if let focused {
             let role: String? = copyAttribute(focused, kAXRoleAttribute)
             let selected: String? = copyAttribute(focused, kAXSelectedTextAttribute)
-            Log.write("capture: focusedRole=\(role ?? "?") axSelectedChars=\(selected.map { String($0.count) } ?? "unsupported")")
+            Log.write("capture: focusedRole=\(role ?? "?") axSelectedChars=\(selected.map { String($0.count) } ?? "unsupported") editable=\(input != nil)")
             if let selected {
                 if !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return CapturedText(text: selected, wholeField: false, anchor: anchor, app: app)
+                    return captured(selected, wholeField: false, editable: input != nil)
                 }
                 // AX reports an empty selection: use the whole field.
                 if let value: String = copyAttribute(focused, kAXValueAttribute),
                    !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    return CapturedText(text: value, wholeField: true, anchor: anchor, app: app)
+                    return captured(value, wholeField: true, editable: input != nil)
                 }
                 return nil
             }
@@ -125,7 +165,8 @@ enum TextAccess {
         let copied = copyViaClipboard()
         Log.write("capture: clipboard fallback chars=\(copied.map { String($0.count) } ?? "none")")
         if let copied, !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return CapturedText(text: copied, wholeField: false, anchor: anchor, app: app)
+            // Zoom hides its box, so a selection there is most likely your draft.
+            return captured(copied, wholeField: false, editable: input != nil || selectAllIfEmpty)
         }
 
         guard selectAllIfEmpty else { return nil }
@@ -137,9 +178,9 @@ enum TextAccess {
             deselect()
             return nil
         }
-        var captured = CapturedText(text: all, wholeField: true, anchor: anchor, app: app)
-        captured.weSelectedAll = true
-        return captured
+        var result = captured(all, wholeField: true, editable: true)
+        result.weSelectedAll = true
+        return result
     }
 
     /// Moves the caret to the end so a selection we made doesn't get typed over.
@@ -166,7 +207,7 @@ enum TextAccess {
 
     // MARK: - Accessibility helpers
 
-    private static func copyAttribute<T>(_ element: AXUIElement, _ attribute: String) -> T? {
+    static func copyAttribute<T>(_ element: AXUIElement, _ attribute: String) -> T? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value as? T
@@ -186,12 +227,17 @@ enum TextAccess {
     }
 
     private static func frame(of element: AXUIElement) -> NSRect? {
+        axFrame(of: element).map(flip)
+    }
+
+    /// The element's frame as AX reports it (top-left origin).
+    private static func axFrame(of element: AXUIElement) -> CGRect? {
         guard let posValue: AXValue = copyAttribute(element, kAXPositionAttribute),
               let sizeValue: AXValue = copyAttribute(element, kAXSizeAttribute) else { return nil }
         var pos = CGPoint.zero, size = CGSize.zero
         AXValueGetValue(posValue, .cgPoint, &pos)
         AXValueGetValue(sizeValue, .cgSize, &size)
-        return flip(CGRect(origin: pos, size: size))
+        return CGRect(origin: pos, size: size)
     }
 
     private static func elementBounds(_ element: AXUIElement) -> NSRect? {
@@ -206,6 +252,10 @@ enum TextAccess {
     }
 
     /// AX uses top-left origin on the primary screen; Cocoa uses bottom-left.
+    static func flip(_ point: NSPoint) -> CGPoint {
+        CGPoint(x: point.x, y: (NSScreen.screens.first?.frame.height ?? 0) - point.y)
+    }
+
     private static func flip(_ rect: CGRect) -> NSRect {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         return NSRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)

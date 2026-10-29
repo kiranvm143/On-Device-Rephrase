@@ -2,13 +2,16 @@
 
 **A Grammarly-style writing helper for every app on your computer.** Select text (or just type in a text box),
 click the ✨ icon or press a hotkey, and pick a rewrite: **Fix · Rephrase · Shorter · Professional · Friendly**.
-Press Enter and your text is replaced.
+Press Enter and your text is replaced. In chat apps it can also **draft a reply** to the messages on screen.
 
 <p align="center">
   <img src="docs/images/popup-fix.png" width="520" alt="Rephrase fixing grammar, with removed words in red and new words in green">
 </p>
 
 - **Works everywhere:** mail, chat, browsers, documents, Teams, Zoom, Slack…
+- **Reply drafts:** in Teams, Slack, Zoom and other chat apps, click ✨ in an empty message box and Rephrase reads
+  the last messages and writes your answer. Type a few words first (`yes but next week`) to steer it. It never sends
+  anything for you.
 - **Free and private on Mac:** Apple's on-device AI, with no account, nothing sent anywhere, and works offline.
 - **Or use your own ChatGPT or Claude account**, or a free local model (Ollama), on Mac, Windows and Linux.
 - **No API keys, no terminal.** Switch engines in the popup; if one needs setting up, the popup gives you one
@@ -39,6 +42,7 @@ On Mac, allow Rephrase in **System Settings → Privacy & Security → Accessibi
 |---|---|---|
 | Open | Click ✨ in a text box, or select text and press **⌃⌥R** | Select text and press **Ctrl+Alt+R** |
 | Pick a rewrite | `1`–`5` or `Tab` | `1`–`5` or `Tab` |
+| Draft a reply | ✨ or **⌃⌥R** in an empty message box (or pick **Reply**) | Select the messages, **Ctrl+Alt+R**, pick **Reply** |
 | Replace / Copy / Close | `↩` / `⌘C` / `esc` | `Enter` / `Ctrl+C` / `Esc` |
 | Change engine | Engine name at the popup's top right | Engine name at the popup's top right |
 
@@ -62,21 +66,23 @@ subscription logins for its own apps, and an API key is the supported route for 
 
 ## Documentation
 
-- **[User Guide](docs/USER_GUIDE.md)**: install, first launch, every feature, engines and setup, settings,
+- **[User Guide](docs/USER_GUIDE.md)**: install, first launch, every feature (including
+  [reply drafts](docs/USER_GUIDE.md#4-draft-a-reply)), engines and setup, settings,
   privacy, troubleshooting, uninstall, FAQ.
 - **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: how it works, repository layout, build and test, debugging,
   CI and releases, adding engines.
 
 ## Privacy in short
 
-Apple and Ollama keep your text on your computer. ChatGPT and Claude receive only the text you rewrite. Rephrase
+Apple and Ollama keep your text on your computer. ChatGPT and Claude receive only the text you rewrite, or the
+messages you reply to. Rephrase
 skips password fields, terminals and password managers, restores your clipboard, and never logs your text.
 
 ## Contributing
 
 Bug reports and pull requests are welcome. Please open an
 [issue](https://github.com/kiranvm143/On-Device-Rephrase/issues) with the last lines of the log (see
-[Troubleshooting](docs/USER_GUIDE.md#8-troubleshooting)). Testing on Windows and Linux is especially helpful. To build
+[Troubleshooting](docs/USER_GUIDE.md#9-troubleshooting)). Testing on Windows and Linux is especially helpful. To build
 from source, see the [Developer Guide](docs/DEVELOPER_GUIDE.md#6-build-run-and-test).
 
 ## License

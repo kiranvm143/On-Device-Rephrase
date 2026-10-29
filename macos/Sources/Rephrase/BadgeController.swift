@@ -80,6 +80,16 @@ final class BadgeController {
     private var lastTyped: (date: Date, pid: pid_t)?
     private var lastClick: (date: Date, point: NSPoint)?
 
+    /// Where you clicked before typing in the front app (Accessibility coordinates), used to find
+    /// the chat above a message box the app hides. Nil if you haven't typed there recently.
+    var typingPoint: CGPoint? {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              let lastTyped, lastTyped.pid == front.processIdentifier,
+              Date().timeIntervalSince(lastTyped.date) < 300,
+              let lastClick, lastClick.date < lastTyped.date else { return nil }
+        return TextAccess.flip(lastClick.point)
+    }
+
     /// You've typed in the front app recently and haven't clicked elsewhere since.
     var isTypingInFrontApp: Bool {
         guard let front = NSWorkspace.shared.frontmostApplication,
@@ -135,7 +145,8 @@ final class BadgeController {
               !Self.excludedApps.contains(appID)
         else { note("skipped app \(appID)"); return hide() }
 
-        let (frame, reason, hidden) = TextAccess.focusedTextField()
+        // In chat apps the icon shows in an empty message box too, for drafting a reply.
+        let (frame, reason, hidden) = TextAccess.focusedTextField(allowEmpty: ConversationReader.isChatApp(appID))
         let s = Self.size
         let origin: NSPoint
         if let field = frame {
@@ -178,7 +189,7 @@ private final class BadgeView: NSView {
     init(onClick: @escaping () -> Void) {
         self.onClick = onClick
         super.init(frame: NSRect(x: 0, y: 0, width: BadgeController.size, height: BadgeController.size))
-        toolTip = "Rephrase (⌃⌥R) — click to rewrite, hold and drag to move"
+        toolTip = "Rephrase (⌃⌥R) — click to rewrite or draft a reply, hold and drag to move"
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }

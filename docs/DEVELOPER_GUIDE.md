@@ -51,17 +51,18 @@ The clipboard is always restored after a copy or paste.
 
 ```
 macos/
-  Package.swift                 Swift package (macOS 26, links FoundationModels)
+  Package.swift                 Swift package (macOS 26, links FoundationModels, ScreenCaptureKit, Vision)
   build.sh                      Builds Rephrase.app, signs it, installs to ~/Applications
   Sources/Rephrase/
-    main.swift                  Entry point; --test, --probe, --demo modes
+    main.swift                  Entry point; --test, --probe, --read-test, --ocr-test, --demo modes
     AppDelegate.swift           Menu bar, hotkey, wiring
     HotKey.swift                Global ⌃⌥R via Carbon RegisterEventHotKey
-    TextAccess.swift            Read selection / focused field (AX), copy & paste fallbacks
+    TextAccess.swift            Read selection / focused field (AX), copy & paste fallbacks, reply target
+    ConversationReader.swift    Reads the messages above the message box (AX, or screen text via Vision)
     BadgeController.swift       The ✨ icon: focus polling, typing fallback, drag & per-app offsets
     PopupController.swift       Popup model + SwiftUI views (modes, engine picker, setup panel)
     WordDiff.swift              Red/green word diff for Fix
-    RewriteEngine.swift         Modes, prompts, engine dispatch, Apple on-device model
+    RewriteEngine.swift         Modes, rewrite and reply prompts, engine dispatch, Apple on-device model
     CLIEngine.swift             Claude Code / Codex runners, status checks, process helper
     CodexDownloader.swift       Downloads + verifies Rephrase's private Codex
     Ollama.swift                Ollama HTTP client (chat, tags, pull with progress)
@@ -79,7 +80,7 @@ desktop/
     engines.py                  Engine runners, status checks, NeedsSetup
     enginesetup.py              Setup copy + install / sign-in / start / pull actions, Runner
     codexdl.py                  Downloads + verifies Rephrase's private Codex
-    prompts.py                  Modes, prompts, output cleanup
+    prompts.py                  Modes, rewrite and reply prompts, output cleanup
     config.py                   config.json + rephrase.log
 install/
   install.sh                    macOS (build from source, or release zip) and Linux (venv)
@@ -102,6 +103,32 @@ docs/                           This guide, the user guide, screenshots
    (Zoom), ⌘A then ⌘C (`weSelectedAll = true`, so cancelling sends → to deselect).
 5. Write back by putting the rewrite on the clipboard, re-activating the app, ⌘A if `wholeField`, then ⌘V, and
    restoring the old clipboard 0.6 s later (marked `org.nspasteboard.TransientType` so clipboard managers skip it).
+6. `CapturedText.editable` says whether the text came from a box you type in. If not (`isConversation`), it's
+   messages you selected: Reply uses them as the conversation, and Enter copies instead of pasting.
+7. Nothing to capture? `replyTarget(chatApp:)` returns an empty capture for the focused text box (or, in chat apps
+   that hide it, the caret), with `inputFrame`, so the popup opens on Reply.
+
+### Reply drafts (`ConversationReader.swift`)
+
+- **Where:** the window that holds the message box; the message area is above the box, in its column
+  (box x-range −80/+20 pt), so sidebars and other panes are excluded. Without a box frame (Zoom), it's ±380 pt
+  around where you clicked before typing (`BadgeController.typingPoint`), else the whole window.
+- **Accessibility first:** walks the window bottom-up (newest first) with `AXUIElementCopyMultipleAttributeValues`,
+  pruning subtrees whose frame misses the area and skipping buttons, menus, images and editable fields. Keeps
+  `AXStaticText` / read-only text values; drops 1-pixel frames, which is how Chromium reports text scrolled out of
+  view. Stops at 4,000 characters, 6,000 nodes or 1.5 s. Typically 0.01–0.1 s.
+- **Screen text fallback:** under 40 characters from AX (Zoom) means OCR: ScreenCaptureKit captures that one window
+  (`SCScreenshotManager`, needs Screen Recording; checked with `CGPreflightScreenCaptureAccess`), Vision
+  `VNRecognizeTextRequest` (accurate, language correction, automatic language) reads it, and pieces are sorted into
+  rows. About 0.15 s warm; the first run after boot loads the model (up to ~25 s).
+- **Joining:** pieces on the same row and close together (< 60 pt) are joined with two spaces, rows with newlines;
+  the newest 4,000 characters are kept.
+- **Prompt:** `RewriteEngine.replyInstructions(hasNotes:)` names the user (`NSFullUserName()`) so the model can tell
+  their messages apart, treats the conversation as data (prompt injection), answers open questions, matches tone,
+  and avoids claims about the user's plans. Typed text in the box becomes `<notes>`. Python mirrors it in
+  `prompts.reply_instructions()` (without notes).
+- **Chat apps** (`ConversationReader.chatApps`): the ✨ icon also shows in their empty message box, and a selection
+  there opens on Reply.
 
 ### The ✨ icon (`BadgeController.swift`)
 
@@ -120,14 +147,18 @@ docs/                           This guide, the user guide, screenshots
 
 - A `KeyPanel` (`NSPanel`, `.nonactivatingPanel`, `canBecomeKey = true`) takes keys without activating
   Rephrase, so the original app stays frontmost and ⌘V lands there.
-- `PopupModel` caches one result per mode, with state `.loading / .done / .failed / .setup(kind, state)`.
-  Switching engine clears the cache.
+- `PopupModel` caches one result per mode, with state `.loading / .done / .failed / .setup(kind, state) /
+  .needsScreenAccess`. Switching engine clears the cache. The conversation for Reply is read once per popup
+  (`r` drafts again from the same read). With an empty box (`replyOnly`) the rewrite modes are disabled.
 - `EnginePicker` (SwiftUI `Menu`) and `SetupPanel` read `EngineSetup.shared`.
 - A global mouse-down monitor closes the popup when you click elsewhere.
 
 ### Permissions and signing
 
 - **Accessibility** is required (AX reads and synthetic keys). TCC ties the grant to the code signature.
+- **Screen Recording** is optional, asked for only when a reply needs screen text (Zoom). The popup's
+  **Allow Screen Reading…** calls `CGRequestScreenCaptureAccess()`; macOS may need Rephrase restarted afterwards
+  (**Reopen Rephrase**).
 - `build.sh` signs ad-hoc with a designated requirement of `identifier "com.local.rephrase"`, so the grant survives
   rebuilds. Without that, every rebuild changes the cdhash and silently revokes access.
 - Not sandboxed (AX and running CLIs need that), so no Mac App Store. A Developer ID + notarization would remove
@@ -150,6 +181,8 @@ docs/                           This guide, the user guide, screenshots
   reads the clipboard and replace only copies.
 - **pynput is imported lazily** (only when keys are sent or the listener starts). On Linux it needs an X display just
   to import. CI imports every module headless to catch regressions.
+- **Reply:** the selection is the conversation (`engines.draft_reply`); Enter copies the draft and shows a toast,
+  since the selection isn't a text box.
 - **Setup jobs** run in `enginesetup.Runner`, owned by `App`, so a browser sign-in survives the popup closing.
   The popup polls the runner's fields.
 
@@ -194,7 +227,9 @@ open -a Rephrase
 B=macos/build/Rephrase.app/Contents/MacOS/Rephrase
 $B --test "i has went their" fix apple                 # one mode, one engine
 $B --test "hey can u send it" chatgpt                  # all modes
-$B --demo "$PWD/macos/build/shots"                     # popup + PNG snapshots (no Screen Recording needed)
+$B --test "Anna: are you free at 3?" reply apple       # draft a reply to a conversation
+$B --ocr-test window.png 0.85                          # screen-text reader on a screenshot (box at 85% height)
+$B --demo "$PWD/macos/build/shots"                     # popup + PNG snapshots incl. reply (no Screen Recording needed)
 ```
 
 `build.sh` uses `swift build --build-system native` (the default build system failed on Command Line Tools).
@@ -215,7 +250,8 @@ paths need real Windows or X11.
 ### What to test before a release
 
 - Mac: icon in Notes, Teams, Chrome and Zoom; ⌃⌥R with a selection; Replace / Copy / Esc; engine switch; one
-  setup flow.
+  setup flow. Reply in an empty box in Teams, Slack and Zoom (screen reading); Reply with typed notes; Reply on
+  selected messages.
 - Windows/Linux: install script, hotkey in Notepad / a browser, Replace, tray Engine menu, one setup flow.
 - `rephrase --version` and every module importing headless (CI does this).
 
@@ -227,6 +263,7 @@ paths need real Windows or X11.
 |---|---|
 | `~/Library/Logs/Rephrase.log` | Mac: launch/trust state, hotkey presses, capture path, icon decisions (`badge: <app>: <reason>`), engine and setup steps |
 | `open -n -a Rephrase --args --probe <bundle-id>` | Waits 8 s (switch to the app), then writes its AX tree to `~/Library/Logs/Rephrase-probe.txt`: roles, sizes and short labels, never text. This is how we found Zoom's chat box isn't exposed at all. |
+| `open -n -g -a Rephrase --args --read-test <bundle-id or pid> <window title>` | Reads the conversation above the first text box in that (background) window, writes it to `~/Library/Logs/Rephrase-read.txt`, and closes the window. Use it on a sample page, e.g. a separate Chrome instance: `open -g -n -a "Google Chrome" --args --user-data-dir=/tmp/rt --app=file:///path/chat.html`. The file contains message text, so don't run it on real chats. |
 | `rephrase.log` next to `config.json` | Windows/Linux: launch, trigger lengths, engine/setup steps |
 | `--test` | Run an engine from the terminal and time it |
 
@@ -258,15 +295,19 @@ paths need real Windows or X11.
 ## 9. Common changes
 
 **Change a prompt or add a mode:** edit `RewriteMode` in `RewriteEngine.swift` *and* `MODES` / `TITLES` / `TASKS`
-in `prompts.py`. Keep the number keys (1–5) in mind: the popups bind one key per mode.
+in `prompts.py`. Keep the number keys (1–6) in mind: the popups bind one key per mode. Reply is always last and has
+its own prompt (`replyInstructions` / `reply_instructions`).
 
 **Add an engine:**
 
-1. Mac: add a case to `EngineKind` (title, short name, busy label), a branch in `RewriteEngine.rewrite`, a status
+1. Mac: add a case to `EngineKind` (title, short name, busy label), a branch in `RewriteEngine.generate`, a status
    check in `EngineSetup.refresh`, copy in `SetupCopy`, and actions in `performAction`.
-2. Windows/Linux: add it to `ENGINES` / `TITLES` / `SHORT`, write `rewrite_<name>` and a `status` branch in
-   `engines.py`, and add copy and an action in `enginesetup.py`.
+2. Windows/Linux: add it to `ENGINES` / `TITLES` / `SHORT`, write `ask_<name>(system, user, temperature, cfg)`,
+   add it to `ASK` and a `status` branch in `engines.py`, and add copy and an action in `enginesetup.py`.
 3. Throw `needsSetup` / `NeedsSetup` for anything the user can fix, so the popup shows a button instead of an error.
+
+**Treat another app as a chat app:** add its bundle ID to `ConversationReader.chatApps` (icon in the empty
+message box, selections open on Reply).
 
 **Support another app that hides its text box:** probe it, and if it really exposes nothing, add its bundle ID to
 `typingFallbackApps` in `BadgeController.swift`.
@@ -285,4 +326,8 @@ and the labels in the menu, popup footer and docs.
 - Claude needs a paid plan that includes Claude Code.
 - Apps that draw their own text (Google Docs) or hide it from AX entirely only work through the copy/paste path.
 - Wayland: clipboard mode only.
+- Reply drafts read only what's visible on screen. Windows/Linux can't read other apps' messages yet: you select
+  them. Zoom needs Screen Recording, and its message box position is guessed from where you clicked.
+- The small Apple model sometimes answers questions it can't know (e.g. "I got your email"); drafts are meant to be
+  checked before sending.
 - The Mac hotkey isn't configurable from the UI.

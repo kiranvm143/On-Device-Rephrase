@@ -1,5 +1,6 @@
 """The rewrite popup: mode buttons, engine picker, the result (with a red/green diff for Fix),
-a setup panel when the chosen engine needs installing / signing in, and Replace / Copy."""
+a setup panel when the chosen engine needs installing / signing in, and Replace / Copy.
+Reply treats the selected text as messages to answer and copies the drafted reply."""
 
 import difflib
 import queue
@@ -10,12 +11,12 @@ from tkinter import ttk
 
 from . import codexdl, engines, enginesetup, prompts, textio
 
-WIDTH, HEIGHT = 560, 250
+WIDTH, HEIGHT = 600, 250
 BG, SELECTED, MUTED, RED, GREEN = "#f7f7f7", "#dde7f7", "#888", "#c62828", "#1b7f3b"
 
 
 class Popup:
-    def __init__(self, root, text, cfg, runner, on_engine_change, on_replace, on_close):
+    def __init__(self, root, text, cfg, runner, on_engine_change, on_replace, on_close, on_message=None):
         self.root = root
         self.text = text
         self.cfg = cfg
@@ -24,6 +25,7 @@ class Popup:
         self.on_engine_change = on_engine_change
         self.on_replace = on_replace
         self.on_close = on_close
+        self.on_message = on_message or (lambda message: None)
         self.mode = "fix"
         self.results = {}                   # mode -> ("ok" | "error" | "setup", value)
         self.pending = set()
@@ -46,6 +48,8 @@ class Popup:
         bar.pack(fill="x")
         self.mode_buttons = {}
         for m in prompts.MODES:
+            if m == "reply":
+                tk.Frame(bar, width=1, height=16, bg="#c8c8c8").pack(side="left", padx=(2, 6))
             b = tk.Button(bar, text=prompts.TITLES[m], relief="flat", bd=0, padx=8, pady=3, bg=BG,
                           activebackground=SELECTED, cursor="hand2", command=lambda m=m: self.select(m))
             b.pack(side="left", padx=(0, 4))
@@ -91,9 +95,10 @@ class Popup:
 
         foot = tk.Frame(body, bg=BG)
         foot.pack(fill="x")
-        tk.Label(foot, text="Enter replace · Ctrl+C copy · 1-5 / Tab switch · Esc close",
-                 fg=MUTED, bg=BG).pack(side="left")
-        tk.Button(foot, text="Replace", command=self.replace, default="active").pack(side="right")
+        self.hint = tk.Label(foot, fg=MUTED, bg=BG)
+        self.hint.pack(side="left")
+        self.main_button = tk.Button(foot, text="Replace", command=self.replace, default="active")
+        self.main_button.pack(side="right")
         tk.Button(foot, text="Copy", command=self.copy).pack(side="right", padx=6)
 
         win.bind("<Return>", lambda e: self.enter())
@@ -102,6 +107,7 @@ class Popup:
         win.bind("<Tab>", lambda e: self.cycle(1) or "break")
         win.bind("<Shift-Tab>", lambda e: self.cycle(-1) or "break")
         win.bind("<Control-c>", lambda e: self.copy())
+        win.bind("r", lambda e: self.retry())
         for i in range(1, len(prompts.MODES) + 1):
             win.bind(str(i), lambda e, i=i: self.select(prompts.MODES[i - 1]))
         win.bind("<FocusOut>", self._maybe_close_on_blur)
@@ -151,6 +157,13 @@ class Popup:
         self._update_picker()
         self.retry_all()
 
+    def retry(self):
+        """Runs the current mode again: a fresh rewrite, or a new reply draft."""
+        if self.mode in self.pending:
+            return
+        self.results.pop(self.mode, None)
+        self.select(self.mode)
+
     def retry_all(self):
         self.results.clear()
         self.pending.clear()
@@ -187,6 +200,10 @@ class Popup:
         for m, b in self.mode_buttons.items():
             b.configure(bg=SELECTED if m == mode else BG,
                         font=("TkDefaultFont", 9, "bold") if m == mode else ("TkDefaultFont", 9))
+        reply = mode == "reply"
+        self.hint.configure(text="Enter copy reply · r new draft · Esc close" if reply
+                            else "Enter replace · Ctrl+C copy · 1-6 / Tab switch · Esc close")
+        self.main_button.configure(text="Copy Reply" if reply else "Replace")
         if mode not in self.results and mode not in self.pending:
             self.pending.add(mode)
             threading.Thread(target=self._work, args=(mode, self.engine), daemon=True).start()
@@ -194,7 +211,10 @@ class Popup:
 
     def _work(self, mode, engine):
         try:
-            result = ("ok", engines.rewrite(self.text, mode, engine, self.cfg))
+            if mode == "reply":
+                result = ("ok", engines.draft_reply(self.text, engine, self.cfg))
+            else:
+                result = ("ok", engines.rewrite(self.text, mode, engine, self.cfg))
         except engines.NeedsSetup as e:
             result = ("setup", (e.engine, e.state, e.model))
         except engines.EngineError as e:
@@ -277,6 +297,9 @@ class Popup:
                 self._insert_diff(self.text, result[1])
         else:
             v.insert("end", result[1])
+            if self.mode == "reply":
+                lines = len([line for line in self.text.splitlines() if line.strip()])
+                v.insert("end", f"\n\nReply to {lines} lines you selected", "muted")
         v.configure(state="disabled")
 
     def _render_setup_progress(self):
@@ -319,6 +342,11 @@ class Popup:
         text = self._result_text()
         if text is None:
             self.win.bell()
+            return
+        if self.mode == "reply":
+            # The selection is someone's messages, not a text box: hand the draft over instead.
+            self.copy()
+            self.on_message("Reply copied — click the message box and press Ctrl+V.")
             return
         self.close()
         self.on_replace(text)

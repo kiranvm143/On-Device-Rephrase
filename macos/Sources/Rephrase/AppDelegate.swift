@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private let popup = PopupController()
     private var accessItem: NSMenuItem!
+    private var screenItem: NSMenuItem!
     private var badgeItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private lazy var badge = BadgeController { [weak self] in self?.trigger() }
@@ -16,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "text.badge.checkmark", accessibilityDescription: "Rephrase")
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Rephrase Selection  (⌃⌥R)", action: #selector(trigger), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Rephrase or Reply  (⌃⌥R)", action: #selector(trigger), keyEquivalent: "").target = self
         badgeItem = menu.addItem(withTitle: "Show Icon in Text Boxes", action: #selector(toggleBadge), keyEquivalent: "")
         badgeItem.target = self
         menu.addItem(withTitle: "Reset Icon Positions", action: #selector(resetBadgePositions), keyEquivalent: "").target = self
@@ -25,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         accessItem = menu.addItem(withTitle: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
         accessItem.target = self
+        screenItem = menu.addItem(withTitle: "", action: #selector(openScreenSettings), keyEquivalent: "")
+        screenItem.target = self
         let engineMenu = NSMenu()
         for kind in EngineKind.allCases {
             let item = engineMenu.addItem(withTitle: kind.title, action: #selector(chooseEngine(_:)), keyEquivalent: "")
@@ -74,9 +77,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.popup.select(.professional)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                         self.popup.snapshot(to: dir.appendingPathComponent("popup-professional.png"))
+                        self.showReplyDemo(saveTo: dir)
                     }
                 }
             }
+        }
+    }
+
+    /// `--demo`: a reply drafted from a sample conversation, as if you had selected it.
+    private func showReplyDemo(saveTo dir: URL) {
+        let frame = NSScreen.main?.visibleFrame ?? .zero
+        var captured = CapturedText(
+            text: """
+                  Priya Shah  10:02 AM
+                  Hi! Are we still on for the design review tomorrow?
+                  Priya Shah  10:03 AM
+                  Also, could you share the latest mockups before then?
+                  """,
+            wholeField: false,
+            anchor: NSRect(x: frame.midX - 230, y: frame.midY + 140, width: 1, height: 20),
+            app: nil)
+        captured.editable = false
+        popup.show(for: captured, startWith: .reply)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            self.popup.snapshot(to: dir.appendingPathComponent("popup-reply.png"))
         }
     }
 
@@ -107,13 +131,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openAccessibilitySettings()
             return
         }
-        guard let captured = TextAccess.captureSelection(selectAllIfEmpty: badge.isTypingInFrontApp) else {
+        // Text to rewrite; or else an empty message box to draft a reply into.
+        let chatApp = ConversationReader.isChatApp(front?.bundleIdentifier)
+        guard var captured = TextAccess.captureSelection(selectAllIfEmpty: badge.isTypingInFrontApp)
+                ?? TextAccess.replyTarget(chatApp: chatApp) else {
             Log.write("capture: nothing found")
             popup.showMessage("No text found. Select some text (or click into a text box) and press ⌃⌥R again.")
             return
         }
-        Log.write("capture: ok chars=\(captured.text.count) wholeField=\(captured.wholeField)")
-        popup.show(for: captured)
+        captured.typingPoint = badge.typingPoint
+        Log.write("capture: ok chars=\(captured.text.count) wholeField=\(captured.wholeField) editable=\(captured.editable) chatApp=\(chatApp)")
+        // Messages selected in a chat app: you most likely want to answer them.
+        popup.show(for: captured, startWith: captured.isConversation && chatApp ? .reply : .fix)
+    }
+
+    @objc private func openScreenSettings() {
+        ConversationReader.requestScreenAccess()
     }
 
     @objc private func openAccessibilitySettings() {
@@ -127,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessItem.title = AXIsProcessTrusted()
             ? "Accessibility: allowed ✓"
             : "Accessibility: not allowed — click to open Settings"
+        // Only needed for replies in apps that hide their messages (Zoom), so it's optional.
+        screenItem.title = ConversationReader.hasScreenAccess
+            ? "Screen reading for replies: allowed ✓"
+            : "Screen reading for replies (Zoom): off — click to allow"
     }
 }
 

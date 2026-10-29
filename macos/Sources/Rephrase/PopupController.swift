@@ -9,16 +9,26 @@ private final class KeyPanel: NSPanel {
 
 @MainActor
 final class PopupModel: ObservableObject {
-    enum State { case loading, done(String), failed(String), setup(EngineKind, EngineState) }
+    enum State { case loading, done(String), failed(String), setup(EngineKind, EngineState), needsScreenAccess }
 
     @Published var mode: RewriteMode = .fix
     @Published private(set) var engine: EngineKind = RewriteEngine.shared.kind
     @Published private(set) var states: [RewriteMode: State] = [:]
+    /// What's happening before the engine is asked, e.g. reading the conversation.
+    @Published private(set) var busyText: String?
+    /// The messages a reply is drafted from, read once per popup.
+    @Published private(set) var conversation: Conversation?
     let captured: CapturedText
 
     init(captured: CapturedText) {
         self.captured = captured
     }
+
+    /// Opened on an empty message box: there's nothing to rewrite, only a reply to draft.
+    var replyOnly: Bool { captured.text.isEmpty }
+
+    /// Your typed notes turn into the reply (selected messages are the conversation instead).
+    var replyNotes: String { captured.isConversation ? "" : captured.text }
 
     var current: State { states[mode] ?? .loading }
 
@@ -28,6 +38,7 @@ final class PopupModel: ObservableObject {
     }
 
     func select(_ newMode: RewriteMode) {
+        if replyOnly && newMode != .reply { return }
         mode = newMode
         if case .done = states[newMode] { return }
         if case .loading = states[newMode] { return }
@@ -36,16 +47,39 @@ final class PopupModel: ObservableObject {
         let engine = engine
         Task {
             do {
-                let output = try await RewriteEngine.shared.rewrite(text, mode: newMode, using: engine)
+                let output: String
+                if newMode == .reply {
+                    let conversation = try await loadConversation()
+                    output = try await RewriteEngine.shared.draftReply(to: conversation.text, notes: replyNotes, using: engine)
+                } else {
+                    output = try await RewriteEngine.shared.rewrite(text, mode: newMode, using: engine)
+                }
                 guard engine == self.engine else { return }   // you switched engines meanwhile
                 states[newMode] = .done(output)
             } catch RewriteError.needsSetup(let kind, let state) {
                 EngineSetup.shared.record(kind, state)
                 states[newMode] = .setup(kind, state)
+            } catch ConversationError.needsScreenAccess {
+                states[newMode] = .needsScreenAccess
             } catch {
                 states[newMode] = .failed(error.localizedDescription)
             }
         }
+    }
+
+    private func loadConversation() async throws -> Conversation {
+        if let conversation { return conversation }
+        let result: Conversation
+        if captured.isConversation {
+            result = Conversation(text: captured.text, source: .selection)
+        } else {
+            guard let pid = captured.app?.processIdentifier else { throw ConversationError.nothingFound }
+            busyText = "Reading the conversation…"
+            defer { busyText = nil }
+            result = try await ConversationReader.read(pid: pid, input: captured.inputFrame, typingPoint: captured.typingPoint)
+        }
+        conversation = result
+        return result
     }
 
     /// Switches engine from the popup's picker; remembered for next time.
@@ -57,7 +91,10 @@ final class PopupModel: ObservableObject {
         retryAll()
     }
 
+    /// Runs the current mode again: a fresh rewrite, or a new reply draft.
+    /// After a screen-access prompt, reads the conversation again too.
     func retry() {
+        if case .needsScreenAccess = current { conversation = nil }
         states[mode] = nil
         select(mode)
     }
@@ -75,7 +112,7 @@ final class PopupController {
     private var keyMonitor: Any?
     private var clickMonitor: Any?
 
-    static let size = NSSize(width: 540, height: 230)
+    static let size = NSSize(width: 580, height: 230)
 
     var isShowing: Bool { panel != nil }
 
@@ -88,7 +125,7 @@ final class PopupController {
         }
     }
 
-    func show(for captured: CapturedText) {
+    func show(for captured: CapturedText, startWith mode: RewriteMode = .fix) {
         close()
 
         let model = PopupModel(captured: captured)
@@ -120,7 +157,7 @@ final class PopupController {
             Task { @MainActor in self?.cancel() }
         }
 
-        model.select(.fix)
+        model.select(captured.text.isEmpty ? .reply : mode)
         EngineSetup.shared.refreshAll()   // status badges in the engine picker
     }
 
@@ -184,6 +221,13 @@ final class PopupController {
     private func replace() {
         guard let model, let text = model.result else { NSSound.beep(); return }
         let captured = model.captured
+        if model.mode == .reply && captured.isConversation {
+            // The selection is someone's messages, not a text box: hand the draft over instead.
+            // (Rewrites still paste: some editors, like Google Docs, don't report that they're editable.)
+            copy()
+            showMessage("Reply copied. Click the message box and press ⌘V.")
+            return
+        }
         close()
         TextAccess.replace(captured, with: text)
     }
@@ -201,11 +245,13 @@ final class PopupController {
         switch event.keyCode {
         case 53: cancel(); return true                        // esc
         case 36, 76:                                         // return / enter
-            if case .setup(let kind, _) = model.current {
-                EngineSetup.shared.performAction(for: kind)   // Enter runs the setup button
-            } else {
-                replace()
+            switch model.current {
+            case .setup(let kind, _): EngineSetup.shared.performAction(for: kind)   // Enter runs the setup button
+            case .needsScreenAccess: ConversationReader.requestScreenAccess()
+            default: replace()
             }
+            return true
+        case 48 where model.replyOnly:
             return true
         case 48:                                             // tab / shift-tab cycles modes
             let i = modes.firstIndex(of: model.mode)!
@@ -244,10 +290,20 @@ private struct PopupView: View {
     let onCopy: () -> Void
     let onClose: () -> Void
 
+    private var isReply: Bool { model.mode == .reply }
+
+    private var hint: String {
+        if isReply {
+            return model.captured.isConversation ? "↩ copy · r new draft · esc close" : "↩ insert · ⌘C copy · r new draft · esc close"
+        }
+        return "↩ replace · ⌘C copy · 1–6 / tab switch · esc close"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 ForEach(Array(RewriteMode.allCases.enumerated()), id: \.element) { index, mode in
+                    if mode == .reply { Divider().frame(height: 14) }
                     Button { model.select(mode) } label: {
                         Text(mode.title)
                             .font(.system(size: 12, weight: model.mode == mode ? .semibold : .regular))
@@ -256,7 +312,9 @@ private struct PopupView: View {
                                         in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .help("Press \(index + 1)")
+                    .disabled(model.replyOnly && mode != .reply)
+                    .opacity(model.replyOnly && mode != .reply ? 0.35 : 1)
+                    .help(mode == .reply ? "Draft a reply to the conversation on screen (press \(index + 1))" : "Press \(index + 1)")
                 }
                 Spacer()
                 EnginePicker(model: model)
@@ -270,11 +328,13 @@ private struct PopupView: View {
             .frame(maxHeight: .infinity)
 
             HStack {
-                Text("↩ replace · ⌘C copy · 1–5 / tab switch · esc close")
+                Text(hint)
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
-                Button("Copy", action: onCopy).disabled(model.result == nil)
-                Button("Replace", action: onReplace)
+                if !(isReply && model.captured.isConversation) {   // there, the main button already copies
+                    Button("Copy", action: onCopy).disabled(model.result == nil)
+                }
+                Button(isReply ? (model.captured.isConversation ? "Copy Reply" : "Insert") : "Replace", action: onReplace)
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.result == nil)
             }
@@ -300,13 +360,25 @@ private struct PopupView: View {
                     Text(activity).foregroundStyle(.secondary)
                 } else {
                     ProgressView().controlSize(.small)
-                    Text(model.engine.busyLabel).foregroundStyle(.secondary)
+                    Text(model.busyText ?? (isReply ? "\(model.engine.shortName): drafting a reply…" : model.engine.busyLabel))
+                        .foregroundStyle(.secondary)
                 }
             }
         case .failed(let message):
             Text(message).foregroundStyle(.red)
         case .setup(let kind, let state):
             SetupPanel(kind: kind, reported: state)
+        case .needsScreenAccess:
+            ScreenAccessPanel(appName: model.captured.app?.localizedName ?? "This app", onCheckAgain: model.retry)
+        case .done(let text) where isReply:
+            VStack(alignment: .leading, spacing: 6) {
+                Text(text).font(.system(size: 14))
+                if let conversation = model.conversation {
+                    Text("Reply to \(conversation.lineCount) lines \(conversation.sourceLabel)"
+                         + (model.replyNotes.isEmpty ? "" : ", using your notes"))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
         case .done(let text):
             if model.mode == .fix {
                 if text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -384,5 +456,40 @@ private struct SetupPanel: View {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red)
             }
         }
+    }
+}
+
+/// Shown when an app hides its messages from Accessibility and screen reading isn't allowed yet.
+private struct ScreenAccessPanel: View {
+    let appName: String
+    let onCheckAgain: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Allow screen reading to draft replies in \(appName)").font(.system(size: 14, weight: .semibold))
+            Text("""
+                 \(appName) doesn't share its messages with Accessibility, so Rephrase reads the text visible in its \
+                 window instead, on this Mac with Apple's text recognition. Nothing is saved. Turn Rephrase on under \
+                 Screen & System Audio Recording, then press ⌃⌥R again.
+                 """)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Allow Screen Reading…") { ConversationReader.requestScreenAccess() }
+                    .buttonStyle(.borderedProminent)
+                Button("Check again", action: onCheckAgain)
+                Button("Reopen Rephrase") { relaunch() }
+                    .help("macOS sometimes only applies the permission after Rephrase restarts")
+            }
+            .controlSize(.regular)
+        }
+    }
+
+    private func relaunch() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; open \"$0\"", Bundle.main.bundlePath]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 }
